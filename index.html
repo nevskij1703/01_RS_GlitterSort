@@ -1,0 +1,375 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#1a1238">
+<title>GlitterSort — Колбочки</title>
+<link rel="icon" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect x='22' y='8' width='20' height='48' rx='10' fill='%23ec4899' stroke='%23fff' stroke-width='3'/></svg>">
+<style>
+/* ============================================================
+   GlitterSort — single-file HTML game
+   See docs/ARCHITECTURE.md for module map.
+   ============================================================ */
+
+:root{
+  --bg-1:#1a1238;
+  --bg-2:#2a1858;
+  --bg-3:#3a1d72;
+  --panel:rgba(255,255,255,.07);
+  --panel-border:rgba(255,255,255,.14);
+  --text:#f1eaff;
+  --text-dim:#a59bd1;
+  --accent:#ffd86b;
+  --accent-2:#ff7ac6;
+  --danger:#ff5b73;
+  --ok:#7be37b;
+
+  /* Колбочки */
+  --c-pink:#ff5fa2;
+  --c-orange:#ff8a2b;
+  --c-yellow:#ffd23f;
+  --c-lime:#9bdc2f;
+  --c-teal:#22d3c8;
+  --c-blue:#3a8bff;
+  --c-purple:#b65bff;
+  --c-crimson:#ef3a5d;
+}
+
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;overflow:hidden;background:var(--bg-1);font-family:'Russo One','Segoe UI',system-ui,sans-serif;color:var(--text);user-select:none;-webkit-user-select:none;touch-action:manipulation}
+body{
+  background:
+    radial-gradient(ellipse at top, var(--bg-3) 0%, var(--bg-2) 35%, var(--bg-1) 75%),
+    var(--bg-1);
+  background-attachment:fixed;
+}
+
+#app{position:fixed;inset:0;display:flex;flex-direction:column;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
+
+/* ===== HEADER ===== */
+.header{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:14px 16px 8px;
+  flex:0 0 auto;
+}
+.level-badge{
+  background:var(--panel);
+  border:1px solid var(--panel-border);
+  border-radius:14px;
+  padding:8px 18px;
+  font-size:18px;
+  letter-spacing:.5px;
+  box-shadow:0 4px 12px rgba(0,0,0,.25);
+}
+.level-badge b{color:var(--accent);font-weight:400}
+.moves-pill{
+  background:var(--panel);
+  border:1px solid var(--panel-border);
+  border-radius:14px;
+  padding:8px 14px;
+  font-size:14px;
+  color:var(--text-dim);
+  min-width:74px;
+  text-align:center;
+}
+.moves-pill b{color:var(--text);font-weight:400}
+
+/* ===== PLAYFIELD ===== */
+.field{
+  flex:1 1 auto;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding:8px;
+  position:relative;
+  overflow:hidden;
+}
+.sticks{
+  display:grid;
+  gap:clamp(8px,2.5vw,18px);
+  width:100%;
+  max-width:560px;
+  align-items:end;
+  justify-items:center;
+  padding:8px;
+}
+
+/* layout by stick count — set via [data-count] on .sticks */
+.sticks[data-count="3"]{grid-template-columns:repeat(3,1fr)}
+.sticks[data-count="4"]{grid-template-columns:repeat(4,1fr)}
+.sticks[data-count="5"]{grid-template-columns:repeat(5,1fr)}
+.sticks[data-count="6"]{grid-template-columns:repeat(3,1fr)}
+.sticks[data-count="7"]{grid-template-columns:repeat(4,1fr)}
+.sticks[data-count="8"]{grid-template-columns:repeat(4,1fr)}
+.sticks[data-count="9"]{grid-template-columns:repeat(5,1fr)}
+.sticks[data-count="10"]{grid-template-columns:repeat(5,1fr)}
+.sticks[data-count="11"]{grid-template-columns:repeat(4,1fr)}
+.sticks[data-count="12"]{grid-template-columns:repeat(4,1fr)}
+.sticks[data-count="13"]{grid-template-columns:repeat(5,1fr)}
+
+/* ===== BOTTLE ===== */
+.bottle{
+  position:relative;
+  width:100%;
+  max-width:64px;
+  aspect-ratio:1 / 2.6;
+  background:linear-gradient(180deg, rgba(255,255,255,.10), rgba(255,255,255,.04));
+  border:2px solid rgba(255,255,255,.4);
+  border-top:none;
+  border-radius:8px 8px 24px 24px / 8px 8px 30px 30px;
+  cursor:pointer;
+  overflow:hidden;
+  display:flex;
+  flex-direction:column-reverse;
+  transition:transform .22s cubic-bezier(.4,0,.25,1);
+  box-shadow:
+    inset 4px 0 4px -3px rgba(255,255,255,.4),
+    inset -4px 0 4px -3px rgba(0,0,0,.3),
+    0 4px 8px rgba(0,0,0,.3);
+}
+.bottle::before{
+  content:'';position:absolute;left:50%;top:-6px;transform:translateX(-50%);
+  width:calc(100% + 12px);height:8px;
+  background:rgba(255,255,255,.5);
+  border-radius:6px;
+  box-shadow:0 2px 4px rgba(0,0,0,.3);
+  pointer-events:none;
+}
+.bottle.selected{
+  transform:translateY(-16px);
+  border-color:var(--accent);
+  box-shadow:
+    inset 4px 0 4px -3px rgba(255,255,255,.4),
+    inset -4px 0 4px -3px rgba(0,0,0,.3),
+    0 8px 16px rgba(255,216,107,.35),
+    0 0 0 2px rgba(255,216,107,.5);
+}
+.bottle.completed{
+  border-color:var(--ok);
+  box-shadow:
+    inset 4px 0 4px -3px rgba(255,255,255,.4),
+    inset -4px 0 4px -3px rgba(0,0,0,.3),
+    0 4px 8px rgba(0,0,0,.3),
+    0 0 0 2px rgba(123,227,123,.4);
+}
+.bottle .layer{
+  width:100%;
+  background:var(--layer-color, #888);
+  transition:height .25s ease, background .15s ease;
+  position:relative;
+  flex:0 0 auto;
+}
+.bottle .layer::after{
+  content:'';position:absolute;left:0;right:0;top:0;height:4px;
+  background:linear-gradient(180deg, rgba(255,255,255,.35), rgba(255,255,255,0));
+  pointer-events:none;
+}
+.bottle .layer.is-new{animation:layerDrop .35s cubic-bezier(.4,0,.25,1)}
+@keyframes layerDrop{
+  0%{transform:translateY(-20px);opacity:.0}
+  60%{transform:translateY(2px);opacity:1}
+  100%{transform:translateY(0);opacity:1}
+}
+.bottle.pouring .layer:last-child{animation:layerPour .25s ease forwards}
+@keyframes layerPour{
+  0%{transform:translateY(0);opacity:1}
+  100%{transform:translateY(-14px);opacity:0}
+}
+
+/* ===== BOTTOM BAR ===== */
+.bottom{
+  flex:0 0 auto;
+  display:flex;
+  gap:10px;
+  padding:10px 14px 18px;
+  align-items:center;
+  justify-content:center;
+}
+.btn{
+  display:inline-flex;align-items:center;justify-content:center;gap:6px;
+  min-width:64px;height:56px;
+  padding:0 16px;
+  background:var(--panel);
+  border:1px solid var(--panel-border);
+  border-radius:16px;
+  color:var(--text);
+  font-family:inherit;font-size:14px;
+  cursor:pointer;
+  transition:transform .1s, background .15s, border-color .15s;
+  box-shadow:0 4px 10px rgba(0,0,0,.25);
+}
+.btn:active{transform:translateY(2px)}
+.btn[disabled]{opacity:.4;cursor:not-allowed}
+.btn .ico{width:24px;height:24px;display:inline-block}
+.btn-primary{background:linear-gradient(180deg,#ff7ac6,#b65bff);border-color:rgba(255,255,255,.3)}
+.btn-bonus{background:linear-gradient(180deg,#ffd23f,#ff8a2b);color:#3b1300;border-color:#ffb44e}
+.btn-bonus .ico-play{color:#3b1300}
+.btn small{display:block;font-size:10px;opacity:.7;margin-top:2px}
+
+/* ===== MODAL ===== */
+.modal-wrap{
+  position:fixed;inset:0;
+  background:rgba(10,4,30,.7);
+  display:none;
+  align-items:center;justify-content:center;
+  z-index:50;
+  backdrop-filter:blur(4px);
+  -webkit-backdrop-filter:blur(4px);
+}
+.modal-wrap.open{display:flex}
+.modal{
+  background:linear-gradient(180deg,#3a1d72,#1a1238);
+  border:1px solid var(--panel-border);
+  border-radius:24px;
+  padding:28px 26px 22px;
+  width:min(86vw,360px);
+  text-align:center;
+  box-shadow:0 12px 40px rgba(0,0,0,.5);
+}
+.modal h2{font-size:28px;margin-bottom:8px;color:var(--accent)}
+.modal p{color:var(--text-dim);margin-bottom:20px;font-size:14px;line-height:1.5}
+.modal .btn{width:100%;height:54px;font-size:16px}
+
+/* ===== DEV PANEL ===== */
+.dev{
+  position:fixed;top:8px;left:8px;right:8px;bottom:8px;
+  background:rgba(8,4,26,.96);
+  border:1px solid var(--panel-border);
+  border-radius:16px;
+  z-index:100;
+  display:none;
+  flex-direction:column;
+  padding:16px;
+  font-size:12px;
+  overflow:hidden;
+}
+.dev.open{display:flex}
+.dev-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+.dev-head h3{font-size:14px;color:var(--accent)}
+.dev-body{flex:1 1 auto;overflow:auto;padding-right:6px}
+.dev-row{display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap}
+.dev-row label{flex:0 0 130px;color:var(--text-dim)}
+.dev input[type=number],.dev select{
+  flex:1 1 80px;min-width:60px;padding:6px 8px;
+  background:rgba(255,255,255,.06);
+  border:1px solid var(--panel-border);
+  border-radius:8px;color:var(--text);font-family:inherit;font-size:12px;
+}
+.dev input[type=checkbox]{transform:scale(1.2);margin-right:4px}
+.dev .swatches{display:flex;flex-wrap:wrap;gap:6px;flex:1}
+.dev .sw{
+  width:28px;height:28px;border-radius:8px;border:2px solid transparent;cursor:pointer;
+  background:var(--sw-color);box-shadow:inset 0 0 0 1px rgba(0,0,0,.3)
+}
+.dev .sw.on{border-color:var(--accent);box-shadow:0 0 0 2px rgba(255,216,107,.4)}
+.dev .actions{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+.dev .actions button{
+  flex:1;min-width:120px;padding:10px;
+  background:rgba(255,255,255,.08);border:1px solid var(--panel-border);border-radius:10px;
+  color:var(--text);font-family:inherit;font-size:12px;cursor:pointer;
+}
+.dev .actions .primary{background:linear-gradient(180deg,#ff7ac6,#b65bff);font-weight:bold}
+.dev .status{
+  margin-top:8px;padding:8px 10px;
+  background:rgba(255,255,255,.04);
+  border-radius:8px;
+  color:var(--text-dim);
+  font-family:'Consolas',monospace;font-size:11px;
+  white-space:pre-wrap;min-height:34px;
+}
+
+/* ===== TOAST ===== */
+.toast{
+  position:fixed;top:70px;left:50%;transform:translateX(-50%) translateY(-20px);
+  background:rgba(20,10,50,.92);
+  border:1px solid var(--panel-border);
+  padding:10px 18px;border-radius:12px;
+  color:var(--text);font-size:14px;
+  opacity:0;transition:all .25s;
+  pointer-events:none;
+  z-index:60;
+}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+
+/* ===== MOBILE TWEAKS ===== */
+@media (max-width:380px){
+  .level-badge{font-size:16px;padding:6px 14px}
+  .moves-pill{font-size:13px;padding:6px 12px}
+  .btn{min-width:56px;height:50px;padding:0 12px;font-size:13px}
+  .sticks{gap:8px}
+}
+@media (max-height:640px){
+  .header{padding:8px 16px 4px}
+  .bottom{padding:6px 14px 12px}
+  .btn{height:48px}
+}
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="header">
+    <div class="level-badge">Уровень <b id="hud-level">1</b></div>
+    <div class="moves-pill">Ходов: <b id="hud-moves">0</b></div>
+  </div>
+
+  <div class="field">
+    <div id="sticks" class="sticks" data-count="3"></div>
+  </div>
+
+  <div class="bottom">
+    <button class="btn" id="btn-undo" aria-label="Ход назад" title="Ход назад">
+      <span class="ico">↶</span>
+      <span>Назад</span>
+    </button>
+    <button class="btn btn-bonus" id="btn-bonus" aria-label="+ Колба" title="+ Колба за рекламу">
+      <span class="ico">＋</span>
+      <span>Колба<small>за рекламу</small></span>
+    </button>
+    <button class="btn" id="btn-restart" aria-label="Заново" title="Заново">
+      <span class="ico">↻</span>
+      <span>Заново</span>
+    </button>
+  </div>
+</div>
+
+<div class="modal-wrap" id="win-modal">
+  <div class="modal">
+    <h2>Уровень пройден!</h2>
+    <p id="win-text">Молодец! Готов к следующему?</p>
+    <button class="btn btn-primary" id="btn-next">Дальше →</button>
+  </div>
+</div>
+
+<div class="dev" id="dev-panel">
+  <div class="dev-head">
+    <h3>🛠 Дев-панель уровня</h3>
+    <button id="dev-close" style="background:none;border:none;color:var(--text-dim);font-size:20px;cursor:pointer">×</button>
+  </div>
+  <div class="dev-body" id="dev-body">
+    <!-- Заполняется DevPanel.render() -->
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* ============================================================
+   GlitterSort — single-file game logic
+   ------------------------------------------------------------
+   Sections (Ctrl+F to jump):
+     [LEVELS]   Палитра, дефолтные уровни, генераторы, endless
+     [SOLVER]   BFS-решатель, dead-end detection
+     [STATE]    Игровое состояние, ходы, undo, win-проверка
+     [PERSIST]  localStorage save/load
+     [RENDER]   Отрисовка колбочек и HUD
+     [ADS]      Реклама (Native bridge / YaGames / Mock)
+     [DEVPANEL] Редактор параметров уровня
+     [APP]      Bootstrap, обработчики кликов, win flow
+   ============================================================ */
+
+/* TODO: модули будут добавлены в следующих коммитах */
+console.log('[GlitterSort] skeleton loaded');
+</script>
+</body>
+</html>
