@@ -555,27 +555,32 @@ window.Levels = (() => {
   // 10 default levels. `bottles` оставляем null — генерируются по seed
   // (детерминированно) через random-tuned. Для L1-L3 после первой генерации
   // можно закоммитить полученный bottles прямо сюда, чтобы старт был мгновенным.
+  // Таймауты на уровнях держим короткими (≤ 3000мс). Если random-tuned не
+  // успевает попасть в target — срабатывает fallback на reverse-shuffle,
+  // который гарантирует решаемость по построению. Игра не блокируется
+  // надолго на старте уровня. Для production-баланса конкретные раскладки
+  // следует прописывать в `bottles: [...]` явно (см. docs/LEVELS.md).
   const DEFAULT_LEVELS = [
     { level: 1,  sticks: 3,  capacity: 3, emptyStick: 1, difficulty: 4,
-      colours: ['pink','blue'],                          generator:'random-tuned', tuningTimeoutMs: 4000,  seed: 1007, easyMode:true, distinctLayers:true },
+      colours: ['pink','blue'],                          generator:'random-tuned', tuningTimeoutMs: 2000, seed: 1007, easyMode:true, distinctLayers:true },
     { level: 2,  sticks: 4,  capacity: 3, emptyStick: 1, difficulty: 6,
-      colours: ['pink','blue','lime'],                   generator:'random-tuned', tuningTimeoutMs: 6000,  seed: 2007, easyMode:true, distinctLayers:true },
+      colours: ['pink','blue','lime'],                   generator:'random-tuned', tuningTimeoutMs: 2500, seed: 2007, easyMode:true, distinctLayers:true },
     { level: 3,  sticks: 5,  capacity: 3, emptyStick: 1, difficulty: 9,
-      colours: ['pink','blue','lime','purple'],          generator:'random-tuned', tuningTimeoutMs: 8000,  seed: 3007, easyMode:true, distinctLayers:true },
+      colours: ['pink','blue','lime','purple'],          generator:'random-tuned', tuningTimeoutMs: 3000, seed: 3007, easyMode:true, distinctLayers:true },
     { level: 4,  sticks: 5,  capacity: 4, emptyStick: 1, difficulty: 12,
-      colours: ['pink','orange','teal','purple'],        generator:'random-tuned', tuningTimeoutMs:10000,  seed: 4007, easyMode:true, distinctLayers:true },
+      colours: ['pink','orange','teal','purple'],        generator:'random-tuned', tuningTimeoutMs: 3000, seed: 4007, easyMode:true, distinctLayers:true },
     { level: 5,  sticks: 6,  capacity: 4, emptyStick: 2, difficulty: 14,
-      colours: ['pink','yellow','blue','crimson'],       generator:'random-tuned', tuningTimeoutMs:12000,  seed: 5007, easyMode:true, distinctLayers:true },
+      colours: ['pink','yellow','blue','crimson'],       generator:'random-tuned', tuningTimeoutMs: 3000, seed: 5007, easyMode:true, distinctLayers:true },
     { level: 6,  sticks: 7,  capacity: 4, emptyStick: 3, difficulty: 16,
-      colours: ['orange','lime','blue','purple'],        generator:'random-tuned', tuningTimeoutMs:15000,  seed: 6007, easyMode:true, distinctLayers:true },
+      colours: ['orange','lime','blue','purple'],        generator:'reverse-shuffle', seed: 6007 },
     { level: 7,  sticks: 7,  capacity: 4, emptyStick: 3, difficulty: 18,
-      colours: ['pink','teal','yellow','crimson'],       generator:'random-tuned', tuningTimeoutMs:15000,  seed: 7007, easyMode:true, distinctLayers:true },
+      colours: ['pink','teal','yellow','crimson'],       generator:'reverse-shuffle', seed: 7007 },
     { level: 8,  sticks: 9,  capacity: 4, emptyStick: 1, difficulty: 20,
-      colours: ['pink','orange','blue','lime'],          generator:'random-tuned', tuningTimeoutMs:20000,  seed: 8007, easyMode:true, distinctLayers:true },
+      colours: ['pink','orange','blue','lime'],          generator:'reverse-shuffle', seed: 8007 },
     { level: 9,  sticks: 10, capacity: 4, emptyStick: 2, difficulty: 22,
-      colours: ['teal','yellow','purple','crimson'],     generator:'random-tuned', tuningTimeoutMs:25000,  seed: 9007, easyMode:true, distinctLayers:true },
+      colours: ['teal','yellow','purple','crimson'],     generator:'reverse-shuffle', seed: 9007 },
     { level: 10, sticks: 12, capacity: 4, emptyStick: 4, difficulty: 24,
-      colours: ['pink','orange','blue','purple'],        generator:'random-tuned', tuningTimeoutMs:30000,  seed:10007, easyMode:true, distinctLayers:true },
+      colours: ['pink','orange','blue','purple'],        generator:'reverse-shuffle', seed:10007 },
   ];
 
   const runtimeOverrides = {};
@@ -619,10 +624,10 @@ window.Levels = (() => {
       emptyStick: tier.emptyStick,
       difficulty: tier.difficulty,
       colours,
-      generator: 'random-tuned',
-      tuningTimeoutMs: 30000,
-      easyMode: true,
-      easyModeMaxAttempts: 200,
+      // Используем reverse-shuffle: на больших полях random-tuned + easyMode
+      // не успевает за разумное время. reverse-shuffle гарантирует решаемость
+      // и работает в миллисекундах, даже на 12×4.
+      generator: 'reverse-shuffle',
       distinctLayers: true,
       seed,
       endless: true,
@@ -631,8 +636,8 @@ window.Levels = (() => {
 
   function getParams(n) {
     if (runtimeOverrides[n]) return { ...runtimeOverrides[n], level: n };
-    const custom = window.Persist && Persist.loadCustomLevel
-      ? Persist.loadCustomLevel(n) : null;
+    const custom = window.Persist && window.Persist.loadCustomLevel
+      ? window.Persist.loadCustomLevel(n) : null;
     if (custom) return { ...custom, level: n };
     if (n > DEFAULT_LEVELS.length) {
       if (!_endlessCache[n]) _endlessCache[n] = generateEndlessConfig(n);
