@@ -165,6 +165,14 @@ body{
   background:linear-gradient(180deg, rgba(255,255,255,.35), rgba(255,255,255,0));
   pointer-events:none;
 }
+.bottle .layer.c-pink   {background:var(--c-pink)}
+.bottle .layer.c-orange {background:var(--c-orange)}
+.bottle .layer.c-yellow {background:var(--c-yellow)}
+.bottle .layer.c-lime   {background:var(--c-lime)}
+.bottle .layer.c-teal   {background:var(--c-teal)}
+.bottle .layer.c-blue   {background:var(--c-blue)}
+.bottle .layer.c-purple {background:var(--c-purple)}
+.bottle .layer.c-crimson{background:var(--c-crimson)}
 .bottle .layer.is-new{animation:layerDrop .35s cubic-bezier(.4,0,.25,1)}
 @keyframes layerDrop{
   0%{transform:translateY(-20px);opacity:.0}
@@ -368,8 +376,507 @@ body{
      [APP]      Bootstrap, обработчики кликов, win flow
    ============================================================ */
 
-/* TODO: модули будут добавлены в следующих коммитах */
-console.log('[GlitterSort] skeleton loaded');
+/* ============================================================
+   [SOLVER] — BFS shortest-path + dead-end detection.
+   Portирован из RC_Colbs_v2/game/solver.js. Используется
+   генератором random-tuned и (опционально) системой подсказок.
+   ============================================================ */
+window.Solver = (() => {
+  function findShortestPath(initial, capacity, timeLimitMs = 1000, options = {}) {
+    const multi = options.multiTransfer !== false;
+    const t0 = performance.now();
+    if (isSolved(initial, capacity)) {
+      return { length: 0, explored: 1, time: 0, exhausted: true, firstMove: null };
+    }
+    const visited = new Set();
+    visited.add(hashState(initial));
+    const queue = [{ state: initial.map(b => [...b]), depth: 0, firstMove: null }];
+    let head = 0;
+    let bestLength = Infinity;
+    let bestFirstMove = null;
+    let explored = 0;
+    let timedOut = false;
+    let checkCtr = 0;
+
+    while (head < queue.length) {
+      if ((checkCtr++ & 0xFFF) === 0 && performance.now() - t0 > timeLimitMs) {
+        timedOut = true;
+        break;
+      }
+      const cur = queue[head++];
+      if (cur.depth + 1 >= bestLength) continue;
+      explored++;
+
+      const moves = enumerateMoves(cur.state, capacity, multi);
+      for (const m of moves) {
+        const k = m.count || 1;
+        for (let i = 0; i < k; i++) cur.state[m.to].push(cur.state[m.from].pop());
+        const newDepth = cur.depth + 1;
+        const lineFirst = cur.firstMove || { from: m.from, to: m.to, count: k };
+        if (isSolved(cur.state, capacity)) {
+          if (newDepth < bestLength) {
+            bestLength = newDepth;
+            bestFirstMove = lineFirst;
+          }
+          for (let i = 0; i < k; i++) cur.state[m.from].push(cur.state[m.to].pop());
+          continue;
+        }
+        if (newDepth + 1 < bestLength) {
+          const h = hashState(cur.state);
+          if (!visited.has(h)) {
+            visited.add(h);
+            queue.push({
+              state: cur.state.map(b => [...b]),
+              depth: newDepth,
+              firstMove: lineFirst,
+            });
+          }
+        }
+        for (let i = 0; i < k; i++) cur.state[m.from].push(cur.state[m.to].pop());
+      }
+    }
+    return {
+      length: bestLength === Infinity ? null : bestLength,
+      explored,
+      time: performance.now() - t0,
+      exhausted: !timedOut,
+      firstMove: bestFirstMove,
+    };
+  }
+
+  function enumerateMoves(state, capacity, multi = true) {
+    const N = state.length;
+    const out = [];
+    for (let a = 0; a < N; a++) {
+      const sa = state[a];
+      if (sa.length === 0) continue;
+      const top = sa[sa.length - 1];
+      let runLen = 0;
+      for (let i = sa.length - 1; i >= 0 && sa[i] === top; i--) runLen++;
+      for (let b = 0; b < N; b++) {
+        if (a === b) continue;
+        const sb = state[b];
+        if (sb.length >= capacity) continue;
+        if (sb.length > 0 && sb[sb.length - 1] !== top) continue;
+        const room = capacity - sb.length;
+        const count = multi ? Math.min(runLen, room) : 1;
+        if (count <= 0) continue;
+        out.push({ from: a, to: b, count });
+      }
+    }
+    return out;
+  }
+
+  function isSolved(state, capacity) {
+    return state.every(s =>
+      s.length === 0 ||
+      (s.length === capacity && s.every(c => c === s[0])));
+  }
+
+  function hashState(state) {
+    return state.map(s => s.join(',')).join('|');
+  }
+
+  function findReachableDeadEnds(initial, capacity, options = {}) {
+    const multi = options.multiTransfer !== false;
+    const timeLimitMs = options.timeLimitMs ?? 2000;
+    const t0 = performance.now();
+
+    const reachable = new Set();
+    const goals = [];
+    const predecessors = new Map();
+
+    const startHash = hashState(initial);
+    reachable.add(startHash);
+    if (isSolved(initial, capacity)) goals.push(startHash);
+
+    const queue = [{ state: initial.map(b => [...b]), hash: startHash }];
+    let head = 0;
+    let timedOut = false;
+    let checkCtr = 0;
+
+    while (head < queue.length) {
+      if ((checkCtr++ & 0xFFF) === 0 && performance.now() - t0 > timeLimitMs) {
+        timedOut = true;
+        break;
+      }
+      const cur = queue[head++];
+      const moves = enumerateMoves(cur.state, capacity, multi);
+      for (const m of moves) {
+        const k = m.count || 1;
+        for (let i = 0; i < k; i++) cur.state[m.to].push(cur.state[m.from].pop());
+        const nextHash = hashState(cur.state);
+        if (!reachable.has(nextHash)) {
+          reachable.add(nextHash);
+          if (isSolved(cur.state, capacity)) goals.push(nextHash);
+          queue.push({ state: cur.state.map(b => [...b]), hash: nextHash });
+        }
+        let preds = predecessors.get(nextHash);
+        if (!preds) { preds = new Set(); predecessors.set(nextHash, preds); }
+        preds.add(cur.hash);
+        for (let i = 0; i < k; i++) cur.state[m.from].push(cur.state[m.to].pop());
+      }
+    }
+    if (timedOut) {
+      return { ok:false, reachable:reachable.size, deadEnds:-1, exhausted:false, time:performance.now()-t0 };
+    }
+    if (goals.length === 0) {
+      return { ok:false, reachable:reachable.size, deadEnds:reachable.size, exhausted:true, time:performance.now()-t0 };
+    }
+    const safe = new Set(goals);
+    const safeQueue = [...goals];
+    let safeHead = 0;
+    while (safeHead < safeQueue.length) {
+      const h = safeQueue[safeHead++];
+      const preds = predecessors.get(h);
+      if (!preds) continue;
+      for (const p of preds) {
+        if (!safe.has(p)) { safe.add(p); safeQueue.push(p); }
+      }
+    }
+    const deadEnds = reachable.size - safe.size;
+    return { ok: deadEnds === 0, reachable: reachable.size, deadEnds, exhausted: true, time: performance.now() - t0 };
+  }
+
+  return { findShortestPath, findReachableDeadEnds, isSolved, hashState };
+})();
+
+/* ============================================================
+   [LEVELS] — палитра, 10 ручных уровней, генераторы V1/V2,
+   endless mode.
+   Portирован из RC_Colbs_v2/game/levels.js, адаптирован
+   под палитру 8 цветов и ограничение "2-4 цвета максимум".
+   ============================================================ */
+window.Levels = (() => {
+  const PALETTE = ['pink','orange','yellow','lime','teal','blue','purple','crimson'];
+
+  // 10 default levels. `bottles` оставляем null — генерируются по seed
+  // (детерминированно) через random-tuned. Для L1-L3 после первой генерации
+  // можно закоммитить полученный bottles прямо сюда, чтобы старт был мгновенным.
+  const DEFAULT_LEVELS = [
+    { level: 1,  sticks: 3,  capacity: 3, emptyStick: 1, difficulty: 4,
+      colours: ['pink','blue'],                          generator:'random-tuned', tuningTimeoutMs: 4000,  seed: 1007, easyMode:true, distinctLayers:true },
+    { level: 2,  sticks: 4,  capacity: 3, emptyStick: 1, difficulty: 6,
+      colours: ['pink','blue','lime'],                   generator:'random-tuned', tuningTimeoutMs: 6000,  seed: 2007, easyMode:true, distinctLayers:true },
+    { level: 3,  sticks: 5,  capacity: 3, emptyStick: 1, difficulty: 9,
+      colours: ['pink','blue','lime','purple'],          generator:'random-tuned', tuningTimeoutMs: 8000,  seed: 3007, easyMode:true, distinctLayers:true },
+    { level: 4,  sticks: 5,  capacity: 4, emptyStick: 1, difficulty: 12,
+      colours: ['pink','orange','teal','purple'],        generator:'random-tuned', tuningTimeoutMs:10000,  seed: 4007, easyMode:true, distinctLayers:true },
+    { level: 5,  sticks: 6,  capacity: 4, emptyStick: 2, difficulty: 14,
+      colours: ['pink','yellow','blue','crimson'],       generator:'random-tuned', tuningTimeoutMs:12000,  seed: 5007, easyMode:true, distinctLayers:true },
+    { level: 6,  sticks: 7,  capacity: 4, emptyStick: 3, difficulty: 16,
+      colours: ['orange','lime','blue','purple'],        generator:'random-tuned', tuningTimeoutMs:15000,  seed: 6007, easyMode:true, distinctLayers:true },
+    { level: 7,  sticks: 7,  capacity: 4, emptyStick: 3, difficulty: 18,
+      colours: ['pink','teal','yellow','crimson'],       generator:'random-tuned', tuningTimeoutMs:15000,  seed: 7007, easyMode:true, distinctLayers:true },
+    { level: 8,  sticks: 9,  capacity: 4, emptyStick: 1, difficulty: 20,
+      colours: ['pink','orange','blue','lime'],          generator:'random-tuned', tuningTimeoutMs:20000,  seed: 8007, easyMode:true, distinctLayers:true },
+    { level: 9,  sticks: 10, capacity: 4, emptyStick: 2, difficulty: 22,
+      colours: ['teal','yellow','purple','crimson'],     generator:'random-tuned', tuningTimeoutMs:25000,  seed: 9007, easyMode:true, distinctLayers:true },
+    { level: 10, sticks: 12, capacity: 4, emptyStick: 4, difficulty: 24,
+      colours: ['pink','orange','blue','purple'],        generator:'random-tuned', tuningTimeoutMs:30000,  seed:10007, easyMode:true, distinctLayers:true },
+  ];
+
+  const runtimeOverrides = {};
+  function setRuntimeOverride(n, cfg) { if (cfg) runtimeOverrides[n] = cfg; else delete runtimeOverrides[n]; }
+  function clearRuntimeOverride(n) { delete runtimeOverrides[n]; }
+  function getRuntimeOverride(n) { return runtimeOverrides[n] || null; }
+  function getLevelCount() { return DEFAULT_LEVELS.length; }
+
+  /**
+   * Endless mode. Все уровни L11+ — процедурные. Растим сложность по тирам,
+   * но всегда держим 4 цвета максимум (требование задачи "2-4 максимум").
+   *
+   * Tier-таблица: каждые 4 endless-уровня шаг сложности увеличивается.
+   * filled = sticks - emptyStick, делится на colors нацело (необходимо
+   * для того, чтобы каждый цвет в финале занимал целое число полных колб).
+   */
+  const ENDLESS_TIERS = [
+    // tier 0: 4 колбы на цвет → каждый цвет 1 полная колба
+    { sticks: 7,  capacity: 4, emptyStick: 3, colors: 4, difficulty: 18 },
+    { sticks: 8,  capacity: 4, emptyStick: 4, colors: 4, difficulty: 20 },
+    { sticks: 9,  capacity: 4, emptyStick: 1, colors: 4, difficulty: 22 }, // 2 колбы на цвет
+    { sticks: 10, capacity: 4, emptyStick: 2, colors: 4, difficulty: 24 }, // 2 колбы на цвет
+    // tier 1: усложняем
+    { sticks: 11, capacity: 4, emptyStick: 3, colors: 4, difficulty: 26 },
+    { sticks: 12, capacity: 4, emptyStick: 4, colors: 4, difficulty: 28 },
+    { sticks: 12, capacity: 3, emptyStick: 0, colors: 4, difficulty: 30 }, // 12*3/4=9 — целое
+    { sticks: 9,  capacity: 4, emptyStick: 1, colors: 4, difficulty: 32 },
+  ];
+
+  const _endlessCache = {};
+  function generateEndlessConfig(n) {
+    const tierIdx = (n - DEFAULT_LEVELS.length - 1) % ENDLESS_TIERS.length;
+    const tier = ENDLESS_TIERS[tierIdx];
+    const palette = PALETTE.slice();
+    shuffleInPlace(palette, Math.random);
+    const colours = palette.slice(0, tier.colors);
+    const seed = (Math.random() * 1e9) | 0;
+    return {
+      sticks: tier.sticks,
+      capacity: tier.capacity,
+      emptyStick: tier.emptyStick,
+      difficulty: tier.difficulty,
+      colours,
+      generator: 'random-tuned',
+      tuningTimeoutMs: 30000,
+      easyMode: true,
+      easyModeMaxAttempts: 200,
+      distinctLayers: true,
+      seed,
+      endless: true,
+    };
+  }
+
+  function getParams(n) {
+    if (runtimeOverrides[n]) return { ...runtimeOverrides[n], level: n };
+    const custom = window.Persist && Persist.loadCustomLevel
+      ? Persist.loadCustomLevel(n) : null;
+    if (custom) return { ...custom, level: n };
+    if (n > DEFAULT_LEVELS.length) {
+      if (!_endlessCache[n]) _endlessCache[n] = generateEndlessConfig(n);
+      return { ..._endlessCache[n], level: n };
+    }
+    const idx = Math.max(0, Math.min(DEFAULT_LEVELS.length - 1, n - 1));
+    return { ...DEFAULT_LEVELS[idx], level: n };
+  }
+
+  // -------- PRNG + helpers --------
+  function mulberry32(seed) {
+    let s = seed | 0;
+    return function () {
+      s = (s + 0x6D2B79F5) | 0;
+      let t = Math.imul(s ^ (s >>> 15), 1 | s);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  function shuffleInPlace(arr, rng) {
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(rng() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  }
+  function clampDifficulty(d) {
+    if (!Number.isFinite(d)) return 50;
+    return Math.max(1, Math.min(1000, d | 0));
+  }
+  function clampTimeout(ms) {
+    if (!Number.isFinite(ms)) return 5000;
+    return Math.max(100, Math.min(600_000, ms | 0));
+  }
+  function hashState(state) { return state.map(s => s.join(',')).join('|'); }
+
+  /**
+   * Generator dispatcher:
+   *   1. params.bottles given       → use verbatim
+   *   2. params.generator='random-tuned' → V2 (random + BFS-tuned)
+   *   3. otherwise                  → V1 (reverse-shuffle, default)
+   */
+  function generate(params) {
+    let bottles;
+    if (Array.isArray(params.bottles)) {
+      bottles = params.bottles.map(s => [...s]);
+    } else if (params.generator === 'random-tuned') {
+      bottles = generateRandomTuned(params).bottles;
+    } else {
+      bottles = reverseShuffleFromSolved(params);
+    }
+    return permuteEmptyToEnd(bottles);
+  }
+
+  function permuteEmptyToEnd(sticks) {
+    const filled = [], empty = [];
+    for (const s of sticks) (s.length === 0 ? empty : filled).push(s);
+    return [...filled, ...empty];
+  }
+
+  // -------- Generator V1: reverse-shuffle from solved --------
+  function reverseShuffleFromSolved(params) {
+    const { sticks, capacity, emptyStick, level } = params;
+    const filled = sticks - emptyStick;
+    const seed = (params.seed != null ? params.seed | 0 : (level | 0) * 1000 + 7);
+    const rng = mulberry32(seed);
+    const colours = (Array.isArray(params.colours) && params.colours.length >= 1)
+      ? params.colours.slice(0, Math.min(filled, params.colours.length))
+      : shuffleInPlace([...PALETTE], rng).slice(0, Math.min(filled, PALETTE.length));
+    const state = [];
+    for (let i = 0; i < filled; i++) {
+      const arr = [];
+      for (let j = 0; j < capacity; j++) arr.push(colours[i % colours.length]);
+      state.push(arr);
+    }
+    for (let i = 0; i < emptyStick; i++) state.push([]);
+    return reverseShuffle(state, capacity, clampDifficulty(params.difficulty), rng);
+  }
+
+  function reverseShuffle(state, capacity, difficulty, rng) {
+    const N = state.length;
+    const initialEmpty = state.filter(s => s.length === 0).length;
+    const visited = new Set();
+    visited.add(hashState(state));
+    let lastMove = null;
+    let accepted = 0, attempts = 0;
+    const maxAttempts = difficulty * 8;
+    while (accepted < difficulty && attempts < maxAttempts) {
+      attempts++;
+      const a = Math.floor(rng() * N);
+      const b = Math.floor(rng() * N);
+      if (a === b) continue;
+      if (state[a].length === 0) continue;
+      if (state[b].length >= capacity) continue;
+      if (lastMove && lastMove.from === b && lastMove.to === a) continue;
+      if (lastMove && lastMove.from === a && lastMove.to === b) continue;
+      const donut = state[a].pop();
+      state[b].push(donut);
+      const h = hashState(state);
+      if (visited.has(h)) { state[b].pop(); state[a].push(donut); continue; }
+      visited.add(h);
+      lastMove = { from: a, to: b };
+      accepted++;
+    }
+    // compact pass: restore empty buffer count
+    let safety = 200;
+    let emptyNow = state.filter(s => s.length === 0).length;
+    while (emptyNow < initialEmpty && safety-- > 0) {
+      let src = -1, srcSize = Infinity;
+      for (let i = 0; i < N; i++) {
+        if (state[i].length > 0 && state[i].length < srcSize) { srcSize = state[i].length; src = i; }
+      }
+      if (src < 0) break;
+      let progressed = false;
+      for (let step = 0; step < srcSize; step++) {
+        const candidates = [];
+        for (let j = 0; j < N; j++) if (j !== src && state[j].length < capacity) candidates.push(j);
+        if (candidates.length === 0) break;
+        const dst = candidates[Math.floor(rng() * candidates.length)];
+        const donut = state[src].pop();
+        state[dst].push(donut);
+        visited.add(hashState(state));
+        progressed = true;
+      }
+      if (!progressed) break;
+      emptyNow = state.filter(s => s.length === 0).length;
+    }
+    return state;
+  }
+
+  // -------- Generator V2: random + BFS-tuned --------
+  let _lastTuningMeta = null;
+
+  function generateRandomTuned(params) {
+    const target = clampDifficulty(params.difficulty);
+    const timeoutMs = clampTimeout(params.tuningTimeoutMs);
+    const seed = (params.seed != null ? params.seed | 0 : (params.level | 0) * 1000 + 7);
+    const rng = mulberry32(seed);
+    const capacity = params.capacity;
+    const multiTransfer = params.multiTransfer !== false;
+    const easyMode = params.easyMode === true;
+    const distinctLayers = params.distinctLayers === true;
+    const easyAttempts = Math.max(1, Math.min(100000, (params.easyModeMaxAttempts | 0) || 100));
+    const maxAttempts = easyMode ? easyAttempts : Infinity;
+    const t0 = performance.now();
+
+    let best = null;
+    let attempts = 0, solvableAttempts = 0, deadEndFreeAttempts = 0;
+
+    while (true) {
+      const elapsed = performance.now() - t0;
+      if (elapsed >= timeoutMs) break;
+      if (attempts >= maxAttempts) break;
+      const layout = randomLayout({ ...params, distinctLayers }, rng);
+      attempts++;
+      if (Solver.isSolved(layout, capacity)) continue;
+      const remaining = timeoutMs - elapsed;
+      const perAttempt = Math.min(remaining, 1000);
+      const result = Solver.findShortestPath(layout, capacity, perAttempt, { multiTransfer });
+      if (result.length === null) continue;
+      solvableAttempts++;
+      if (easyMode) {
+        const remainingForCheck = Math.max(100, Math.floor((timeoutMs - (performance.now() - t0)) / 5));
+        const verdict = Solver.findReachableDeadEnds(layout, capacity, {
+          multiTransfer, timeLimitMs: Math.min(1000, remainingForCheck),
+        });
+        if (!verdict.ok) continue;
+        deadEndFreeAttempts++;
+      }
+      const distance = Math.abs(result.length - target);
+      if (!best || distance < best.distance) {
+        best = { bottles: layout, optimalLength: result.length, distance };
+        if (distance === 0) break;
+      }
+    }
+    const elapsedMs = performance.now() - t0;
+
+    if (!best) {
+      _lastTuningMeta = {
+        attempts, solvableAttempts, deadEndFreeAttempts, elapsedMs,
+        optimalLength: null, distance: null,
+        achievedExact: false, fallback: true,
+        easyModeFailed: easyMode,
+        target,
+      };
+      return { bottles: reverseShuffleFromSolved(params), ..._lastTuningMeta };
+    }
+    _lastTuningMeta = {
+      attempts, solvableAttempts, deadEndFreeAttempts, elapsedMs,
+      optimalLength: best.optimalLength,
+      distance: best.distance,
+      achievedExact: best.distance === 0,
+      fallback: false,
+      easyMode,
+      target,
+    };
+    return { bottles: best.bottles, ..._lastTuningMeta };
+  }
+
+  function randomLayout(params, rng) {
+    const { sticks, capacity, emptyStick } = params;
+    const filled = sticks - emptyStick;
+    let colours = (Array.isArray(params.colours) && params.colours.length >= 1)
+      ? params.colours.slice()
+      : PALETTE.slice(0, Math.min(filled, PALETTE.length));
+    // Если цветов меньше чем filled — повторяем
+    while (colours.length < filled) colours = colours.concat(colours).slice(0, filled);
+    colours = colours.slice(0, filled);
+
+    const distinct = params.distinctLayers === true && new Set(colours).size === filled;
+    if (distinct) {
+      const state = [];
+      for (let i = 0; i < filled; i++) state.push([]);
+      for (let layer = 0; layer < capacity; layer++) {
+        const perm = shuffleInPlace([...colours], rng);
+        for (let stick = 0; stick < filled; stick++) state[stick].push(perm[stick]);
+      }
+      for (let i = 0; i < emptyStick; i++) state.push([]);
+      return state;
+    }
+    // distribute donuts: каждый цвет имеет (filled*capacity/colors_count) единиц
+    const colorsUniq = [...new Set(colours)];
+    const total = filled * capacity;
+    const perColor = Math.floor(total / colorsUniq.length);
+    const flat = [];
+    for (const c of colorsUniq) for (let i = 0; i < perColor; i++) flat.push(c);
+    while (flat.length < total) flat.push(colorsUniq[flat.length % colorsUniq.length]);
+    shuffleInPlace(flat, rng);
+    const state = [];
+    for (let i = 0; i < filled; i++) state.push(flat.slice(i * capacity, (i + 1) * capacity));
+    for (let i = 0; i < emptyStick; i++) state.push([]);
+    return state;
+  }
+
+  function getLastTuningMeta() { return _lastTuningMeta; }
+
+  return {
+    PALETTE, DEFAULT_LEVELS, ENDLESS_TIERS,
+    getParams, generate,
+    generateRandomTuned, getLastTuningMeta,
+    setRuntimeOverride, clearRuntimeOverride, getRuntimeOverride,
+    getLevelCount,
+  };
+})();
+
+console.log('[GlitterSort] Solver + Levels loaded; palette=', Levels.PALETTE.length, 'levels=', Levels.getLevelCount());
 </script>
 </body>
 </html>
