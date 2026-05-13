@@ -159,6 +159,8 @@ body{
   transition:height .25s ease, background .15s ease;
   position:relative;
   flex:0 0 auto;
+  /* Высота = 100% / capacity. Capacity передаётся через --cap на .bottle. */
+  height:calc(100% / var(--cap, 4));
 }
 .bottle .layer::after{
   content:'';position:absolute;left:0;right:0;top:0;height:4px;
@@ -1078,7 +1080,182 @@ window.Persist = (() => {
   };
 })();
 
-console.log('[GlitterSort] Solver/Levels/State/Persist loaded');
+/* ============================================================
+   [RENDER] — отрисовка колбочек, HUD, модалок.
+   ============================================================ */
+window.Render = (() => {
+  const $sticks = document.getElementById('sticks');
+  const $hudLevel = document.getElementById('hud-level');
+  const $hudMoves = document.getElementById('hud-moves');
+  const $winModal = document.getElementById('win-modal');
+  const $winText  = document.getElementById('win-text');
+  const $toast    = document.getElementById('toast');
+  const $bonus    = document.getElementById('btn-bonus');
+  const $undo     = document.getElementById('btn-undo');
+
+  function renderAll() {
+    const s = State.get();
+    if (!s) return;
+    $sticks.dataset.count = String(s.sticks.length);
+    $sticks.innerHTML = '';
+    s.sticks.forEach((stack, idx) => $sticks.appendChild(buildBottle(stack, idx, s.capacity)));
+    renderHud();
+    renderActionButtons();
+  }
+
+  function buildBottle(stack, idx, capacity) {
+    const el = document.createElement('div');
+    el.className = 'bottle';
+    el.dataset.idx = String(idx);
+    el.style.setProperty('--cap', capacity);
+    if (State.get().selected === idx) el.classList.add('selected');
+    if (State.isCompletedStack(stack, capacity)) el.classList.add('completed');
+    // bottom-up rendering (column-reverse в CSS); порядок в DOM — снизу вверх
+    for (const color of stack) {
+      const layer = document.createElement('div');
+      layer.className = 'layer c-' + color;
+      el.appendChild(layer);
+    }
+    return el;
+  }
+
+  function renderHud() {
+    const s = State.get();
+    if (!s) return;
+    $hudLevel.textContent = s.level;
+    $hudMoves.textContent = s.moves;
+  }
+
+  function renderActionButtons() {
+    const s = State.get();
+    if (!s) return;
+    $undo.disabled = s.history.length === 0;
+    // Бонусную колбу скрываем, если уже использовали в этом уровне
+    // или колб уже > 12.
+    $bonus.style.display = (s.bonusUsedThisLevel || s.sticks.length >= 13) ? 'none' : '';
+  }
+
+  function showWin(text) {
+    if (text) $winText.textContent = text;
+    $winModal.classList.add('open');
+  }
+  function hideWin() { $winModal.classList.remove('open'); }
+
+  let toastTimer = null;
+  function toast(msg, ms = 1500) {
+    $toast.textContent = msg;
+    $toast.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => $toast.classList.remove('show'), ms);
+  }
+
+  return { renderAll, renderHud, renderActionButtons, showWin, hideWin, toast };
+})();
+
+/* ============================================================
+   [APP] — bootstrap, обработчики кликов, win flow.
+   ============================================================ */
+window.App = (() => {
+  let session = null;       // { levelNum, params }
+  let transferLocked = false;
+
+  function start() {
+    const persisted = Persist.load();
+    loadLevel(persisted.level || 1);
+    wireEvents();
+  }
+
+  function loadLevel(levelNum) {
+    const params = Levels.getParams(levelNum);
+    Render.toast(`Уровень ${levelNum}: генерация...`, 600);
+    // Генератор может быть тяжёлым на старших уровнях — даём UI отрендерить
+    // toast перед блокирующим вызовом.
+    setTimeout(() => {
+      const bottles = Levels.generate(params);
+      State.init({
+        level: levelNum,
+        capacity: params.capacity,
+        sticks: bottles.map(s => [...s]),
+      });
+      session = { levelNum, params };
+      Render.renderAll();
+      Render.hideWin();
+    }, 30);
+  }
+
+  function wireEvents() {
+    document.getElementById('sticks').addEventListener('click', (e) => {
+      const bottle = e.target.closest('.bottle');
+      if (!bottle) return;
+      const idx = +bottle.dataset.idx;
+      if (Number.isNaN(idx)) return;
+      onStickClick(idx);
+    });
+
+    document.getElementById('btn-undo').addEventListener('click', onUndo);
+    document.getElementById('btn-restart').addEventListener('click', onRestart);
+    document.getElementById('btn-next').addEventListener('click', onNext);
+    document.getElementById('btn-bonus').addEventListener('click', onBonus);
+  }
+
+  function onStickClick(idx) {
+    if (transferLocked) return;
+    const result = State.clickStick(idx);
+    if (result === 'invalid') return;
+    Render.renderAll();
+    if (result === 'moved' && State.isWon()) onWin();
+  }
+
+  function onUndo() {
+    const s = State.get();
+    if (!s || s.history.length === 0) { Render.toast('Нечего отменять'); return; }
+    State.undo();
+    const persisted = Persist.load();
+    persisted.stats.undoUsed = (persisted.stats.undoUsed || 0) + 1;
+    Persist.save(persisted);
+    Render.renderAll();
+  }
+
+  function onRestart() {
+    State.restart();
+    Render.renderAll();
+    Render.toast('Уровень перезапущен');
+  }
+
+  function onWin() {
+    const s = State.get();
+    transferLocked = true;
+    const persisted = Persist.load();
+    persisted.totalCompleted = (persisted.totalCompleted || 0) + 1;
+    persisted.stats.totalMoves = (persisted.stats.totalMoves || 0) + (s ? s.moves : 0);
+    // Следующий уровень сохраним заранее, чтобы перезагрузка после победы
+    // показывала уже новый.
+    persisted.level = (s ? s.level : 1) + 1;
+    Persist.save(persisted);
+    Render.showWin(`Молодец! Готов к уровню ${persisted.level}?`);
+  }
+
+  function onNext() {
+    transferLocked = false;
+    const persisted = Persist.load();
+    loadLevel(persisted.level);
+  }
+
+  function onBonus() {
+    // Заглушка — реальная реклама будет в следующем коммите.
+    if (State.addBonusBottle()) {
+      Render.renderAll();
+      Render.toast('+1 колба (бонус)');
+    } else {
+      Render.toast('Уже использована');
+    }
+  }
+
+  return { start, loadLevel };
+})();
+
+document.addEventListener('DOMContentLoaded', () => App.start());
+console.log('[GlitterSort] All modules loaded');
 </script>
 </body>
 </html>
