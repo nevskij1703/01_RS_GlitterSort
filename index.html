@@ -876,7 +876,209 @@ window.Levels = (() => {
   };
 })();
 
-console.log('[GlitterSort] Solver + Levels loaded; palette=', Levels.PALETTE.length, 'levels=', Levels.getLevelCount());
+/* ============================================================
+   [STATE] — игровое состояние, ходы, undo, win-проверка.
+   Адаптирован из RC_Colbs_v2/game/state.js. Убрана валюта
+   (currency/tweezers) — в нашей игре ходы бесплатные. Добавлен
+   bonusUsedThisLevel и addBonusBottle().
+   ============================================================ */
+window.State = (() => {
+  let state = null;
+  function deepCopy(arr) { return arr.map(s => [...s]); }
+
+  function init({ level, capacity, sticks }) {
+    state = {
+      level,
+      capacity,
+      sticks,                   // string[][]
+      initial: deepCopy(sticks),
+      selected: null,
+      moves: 0,                 // счётчик совершённых ходов
+      history: [],              // стек для undo
+      bonusUsedThisLevel: false,
+    };
+    return state;
+  }
+  function get() { return state; }
+  function topColor(stack) { return stack.length ? stack[stack.length - 1] : null; }
+
+  function isCompletedStack(stack, capacity) {
+    return stack.length === capacity && stack.length > 0 && stack.every(c => c === stack[0]);
+  }
+
+  function canMove(src, dst) {
+    if (!state || src === dst) return false;
+    const a = state.sticks[src], b = state.sticks[dst];
+    if (!a || !b) return false;
+    if (a.length === 0) return false;
+    if (isCompletedStack(a, state.capacity)) return false;
+    if (b.length >= state.capacity) return false;
+    if (b.length === 0) return true;
+    return topColor(a) === topColor(b);
+  }
+
+  function move(src, dst) {
+    if (!canMove(src, dst)) return 0;
+    const a = state.sticks[src], b = state.sticks[dst];
+    const top = a[a.length - 1];
+    let runLen = 0;
+    for (let i = a.length - 1; i >= 0 && a[i] === top; i--) runLen++;
+    const room = state.capacity - b.length;
+    const k = Math.min(runLen, room);
+    for (let i = 0; i < k; i++) b.push(a.pop());
+    state.moves++;
+    state.history.push({ src, dst, count: k, color: top });
+    return k;
+  }
+
+  function undo() {
+    if (!state || state.history.length === 0) return false;
+    const last = state.history.pop();
+    const count = last.count || 1;
+    for (let i = 0; i < count; i++) state.sticks[last.src].push(state.sticks[last.dst].pop());
+    state.selected = null;
+    if (state.moves > 0) state.moves--;
+    return true;
+  }
+
+  function clickStick(idx) {
+    if (!state) return 'invalid';
+    if (state.selected === null) {
+      if (state.sticks[idx].length === 0) return 'invalid';
+      if (isCompletedStack(state.sticks[idx], state.capacity)) return 'locked';
+      state.selected = idx;
+      return 'selected';
+    }
+    if (state.selected === idx) {
+      state.selected = null;
+      return 'deselected';
+    }
+    const src = state.selected;
+    const moved = move(src, idx);
+    state.selected = null;
+    return moved > 0 ? 'moved' : 'invalid';
+  }
+
+  function isWon() {
+    if (!state) return false;
+    let total = 0;
+    for (const s of state.sticks) total += s.length;
+    if (total === 0) return false;
+    return state.sticks.every(s =>
+      s.length === 0 || (s.length === state.capacity && s.every(c => c === s[0]))
+    );
+  }
+
+  function restart() {
+    if (!state) return;
+    state.sticks = deepCopy(state.initial);
+    state.selected = null;
+    state.history = [];
+    state.moves = 0;
+    state.bonusUsedThisLevel = false;
+  }
+
+  /**
+   * Добавить пустую колбочку (бонус за rewarded ad). Один раз на уровень.
+   * Колба добавляется в конец массива; initial тоже обновляется, чтобы
+   * Restart не убрал бонус.
+   */
+  function addBonusBottle() {
+    if (!state || state.bonusUsedThisLevel) return false;
+    state.sticks.push([]);
+    state.initial.push([]);
+    state.bonusUsedThisLevel = true;
+    state.selected = null;
+    return true;
+  }
+
+  return {
+    init, get, canMove, move, undo, clickStick, isWon, restart,
+    addBonusBottle, isCompletedStack, deepCopy,
+  };
+})();
+
+/* ============================================================
+   [PERSIST] — localStorage save/load.
+   Ключ "glitterSort.v1". Хранит уровень, статистику, кастомные
+   уровни из дев-панели, счётчик interstitial.
+   ============================================================ */
+window.Persist = (() => {
+  const KEY = 'glitterSort.v1';
+  const DEFAULTS = {
+    version: 1,
+    level: 1,
+    totalCompleted: 0,
+    interstitialCounter: 0,
+    customLevels: {},        // {n: {sticks, capacity, ...}}
+    settings: { sound: true },
+    stats: { totalMoves: 0, undoUsed: 0, bonusUsed: 0 },
+  };
+
+  function load() {
+    try {
+      const raw = localStorage.getItem(KEY);
+      if (!raw) return { ...DEFAULTS };
+      const parsed = JSON.parse(raw);
+      // shallow merge с дефолтами на случай новых полей в будущих версиях
+      return {
+        ...DEFAULTS, ...parsed,
+        settings: { ...DEFAULTS.settings, ...(parsed.settings || {}) },
+        stats:    { ...DEFAULTS.stats,    ...(parsed.stats    || {}) },
+        customLevels: parsed.customLevels || {},
+      };
+    } catch (e) {
+      console.warn('[Persist] load failed, using defaults', e);
+      return { ...DEFAULTS };
+    }
+  }
+
+  function save(data) {
+    try {
+      localStorage.setItem(KEY, JSON.stringify(data));
+    } catch (e) {
+      console.warn('[Persist] save failed', e);
+    }
+  }
+
+  // Custom level configs (overrides from dev panel, persist across reloads)
+  function loadCustomLevel(n) {
+    const data = load();
+    return data.customLevels[n] || null;
+  }
+  function saveCustomLevel(n, cfg) {
+    const data = load();
+    data.customLevels[n] = cfg;
+    save(data);
+  }
+  function clearCustomLevel(n) {
+    const data = load();
+    delete data.customLevels[n];
+    save(data);
+  }
+  function clearAll() {
+    try { localStorage.removeItem(KEY); } catch (e) {}
+  }
+
+  // Interstitial cadence: показывать каждые 2 пройденных уровня
+  function bumpInterstitialCounter() {
+    const data = load();
+    data.interstitialCounter = (data.interstitialCounter || 0) + 1;
+    save(data);
+    return data.interstitialCounter;
+  }
+  function shouldShowInterstitial(counter) {
+    return counter > 0 && counter % 2 === 0;
+  }
+
+  return {
+    KEY, DEFAULTS, load, save,
+    loadCustomLevel, saveCustomLevel, clearCustomLevel, clearAll,
+    bumpInterstitialCounter, shouldShowInterstitial,
+  };
+})();
+
+console.log('[GlitterSort] Solver/Levels/State/Persist loaded');
 </script>
 </body>
 </html>
