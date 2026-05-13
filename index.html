@@ -1257,6 +1257,179 @@ window.Render = (() => {
 })();
 
 /* ============================================================
+   [DEVPANEL] — редактор параметров текущего уровня.
+   Toggle: Ctrl+Shift+D. Состоит из формы и статус-строки.
+   Подробности: docs/LEVELS.md.
+   ============================================================ */
+window.DevPanel = (() => {
+  const $panel = document.getElementById('dev-panel');
+  const $body  = document.getElementById('dev-body');
+  const $close = document.getElementById('dev-close');
+  let isOpen = false;
+
+  function open() {
+    isOpen = true;
+    render();
+    $panel.classList.add('open');
+  }
+  function close() { isOpen = false; $panel.classList.remove('open'); }
+  function toggle() { isOpen ? close() : open(); }
+
+  $close.addEventListener('click', close);
+  document.addEventListener('keydown', (e) => {
+    if (e.ctrlKey && e.shiftKey && (e.key === 'D' || e.key === 'd' || e.code === 'KeyD')) {
+      e.preventDefault();
+      toggle();
+    }
+  });
+
+  function render() {
+    const s = State.get();
+    if (!s) return;
+    const cur = Levels.getParams(s.level);
+    const colourSet = new Set(cur.colours || []);
+    const sticks = cur.sticks | 0;
+    const capacity = cur.capacity | 0;
+    const emptyStick = cur.emptyStick | 0;
+    const difficulty = cur.difficulty | 0;
+    const tuningTimeoutMs = cur.tuningTimeoutMs | 0;
+    const easyMode = !!cur.easyMode;
+    const distinctLayers = !!cur.distinctLayers;
+    const seed = cur.seed | 0;
+    const generator = cur.generator || 'reverse-shuffle';
+
+    $body.innerHTML = `
+      <div class="dev-row"><label>Уровень</label><b style="color:var(--accent)">L${s.level}</b></div>
+      <div class="dev-row"><label>Колбочки (sticks)</label><input type="number" id="dv-sticks" min="3" max="13" value="${sticks}"></div>
+      <div class="dev-row"><label>Ёмкость (capacity)</label><input type="number" id="dv-cap" min="2" max="6" value="${capacity}"></div>
+      <div class="dev-row"><label>Пустых (emptyStick)</label><input type="number" id="dv-empty" min="0" max="13" value="${emptyStick}"></div>
+      <div class="dev-row"><label>Цвета (2-4)</label>
+        <div class="swatches" id="dv-swatches">
+          ${Levels.PALETTE.map(c => `
+            <div class="sw ${colourSet.has(c) ? 'on' : ''}" data-c="${c}" style="--sw-color:var(--c-${c})" title="${c}"></div>
+          `).join('')}
+        </div>
+      </div>
+      <div class="dev-row"><label>Генератор</label>
+        <select id="dv-gen">
+          <option value="reverse-shuffle" ${generator==='reverse-shuffle'?'selected':''}>reverse-shuffle (V1)</option>
+          <option value="random-tuned" ${generator==='random-tuned'?'selected':''}>random-tuned (V2)</option>
+        </select>
+      </div>
+      <div class="dev-row"><label>Сложность (ходы)</label><input type="number" id="dv-diff" min="1" max="100" value="${difficulty}"></div>
+      <div class="dev-row"><label>Тайм-аут (мс)</label><input type="number" id="dv-timeout" min="100" max="120000" step="500" value="${tuningTimeoutMs || 5000}"></div>
+      <div class="dev-row"><label>Easy Mode</label><input type="checkbox" id="dv-easy" ${easyMode ? 'checked' : ''}> <span style="color:var(--text-dim)">без тупиков</span></div>
+      <div class="dev-row"><label>Distinct layers</label><input type="checkbox" id="dv-distinct" ${distinctLayers ? 'checked' : ''}> <span style="color:var(--text-dim)">слои без повторов</span></div>
+      <div class="dev-row"><label>Seed</label><input type="number" id="dv-seed" value="${seed}"></div>
+      <div class="actions">
+        <button class="primary" id="dv-generate">🎲 Сгенерировать</button>
+        <button id="dv-save">💾 Сохранить override</button>
+      </div>
+      <div class="actions">
+        <button id="dv-reset">↺ Сбросить override</button>
+        <button id="dv-copy">📋 Copy JSON</button>
+      </div>
+      <div class="status" id="dv-status">Готов к генерации.</div>
+    `;
+    // Цветовые свотчи — toggle on click, лимит 2-4
+    $body.querySelectorAll('.sw').forEach(sw => {
+      sw.addEventListener('click', () => {
+        sw.classList.toggle('on');
+        const cur = $body.querySelectorAll('.sw.on').length;
+        if (cur > 4) sw.classList.remove('on');
+      });
+    });
+    document.getElementById('dv-generate').addEventListener('click', onGenerate);
+    document.getElementById('dv-save').addEventListener('click', onSave);
+    document.getElementById('dv-reset').addEventListener('click', onReset);
+    document.getElementById('dv-copy').addEventListener('click', onCopy);
+  }
+
+  function readForm() {
+    const colours = [...$body.querySelectorAll('.sw.on')].map(s => s.dataset.c);
+    return {
+      sticks: +document.getElementById('dv-sticks').value || 3,
+      capacity: +document.getElementById('dv-cap').value || 3,
+      emptyStick: +document.getElementById('dv-empty').value || 1,
+      colours,
+      generator: document.getElementById('dv-gen').value,
+      difficulty: +document.getElementById('dv-diff').value || 1,
+      tuningTimeoutMs: +document.getElementById('dv-timeout').value || 5000,
+      easyMode: document.getElementById('dv-easy').checked,
+      distinctLayers: document.getElementById('dv-distinct').checked,
+      seed: +document.getElementById('dv-seed').value || Math.floor(Math.random() * 1e9),
+    };
+  }
+
+  function setStatus(msg, kind) {
+    const el = document.getElementById('dv-status');
+    if (!el) return;
+    el.textContent = msg;
+    el.style.color = kind === 'err' ? 'var(--danger)' : kind === 'ok' ? 'var(--ok)' : 'var(--text-dim)';
+  }
+
+  function onGenerate() {
+    const params = readForm();
+    if (params.colours.length < 2) { setStatus('Выбери минимум 2 цвета', 'err'); return; }
+    if (params.colours.length > 4) { setStatus('Максимум 4 цвета', 'err'); return; }
+    const filled = params.sticks - params.emptyStick;
+    if (filled <= 0) { setStatus('Слишком много пустых колб', 'err'); return; }
+    if ((filled * params.capacity) % params.colours.length !== 0) {
+      setStatus(`Внимание: filled*capacity (${filled * params.capacity}) не делится на ${params.colours.length} цветов нацело — баланс будет неровным.`);
+    }
+    setStatus('Генерация...');
+    setTimeout(() => {
+      try {
+        const cfg = { ...params, level: State.get().level };
+        Levels.setRuntimeOverride(cfg.level, cfg);
+        const bottles = Levels.generate(cfg);
+        State.init({ level: cfg.level, capacity: cfg.capacity, sticks: bottles.map(s => [...s]) });
+        Render.renderAll();
+        const meta = Levels.getLastTuningMeta();
+        if (meta) {
+          const exact = meta.achievedExact ? '✓' : '✗';
+          setStatus(`attempts=${meta.attempts}, solvable=${meta.solvableAttempts}, optimal=${meta.optimalLength}, distance=${meta.distance} ${exact}, ${meta.elapsedMs|0}ms`, meta.achievedExact ? 'ok' : '');
+        } else {
+          setStatus('Сгенерировано (V1).', 'ok');
+        }
+      } catch (e) {
+        console.error(e);
+        setStatus('Ошибка: ' + e.message, 'err');
+      }
+    }, 30);
+  }
+
+  function onSave() {
+    const params = readForm();
+    if (params.colours.length < 2) { setStatus('Выбери минимум 2 цвета', 'err'); return; }
+    const lvl = State.get().level;
+    Persist.saveCustomLevel(lvl, { ...params, level: lvl });
+    setStatus(`Override для L${lvl} сохранён в localStorage`, 'ok');
+  }
+
+  function onReset() {
+    const lvl = State.get().level;
+    Levels.clearRuntimeOverride(lvl);
+    Persist.clearCustomLevel(lvl);
+    setStatus(`Override L${lvl} сброшен. Перезагрузи уровень.`, 'ok');
+  }
+
+  function onCopy() {
+    const params = readForm();
+    const json = JSON.stringify({ ...params, level: State.get().level }, null, 2);
+    try {
+      navigator.clipboard.writeText(json);
+      setStatus('JSON скопирован в буфер', 'ok');
+    } catch (e) {
+      console.log(json);
+      setStatus('Не удалось — JSON в консоли', 'err');
+    }
+  }
+
+  return { open, close, toggle, render };
+})();
+
+/* ============================================================
    [APP] — bootstrap, обработчики кликов, win flow.
    ============================================================ */
 window.App = (() => {
