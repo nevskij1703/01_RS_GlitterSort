@@ -25,7 +25,8 @@
   --danger:#ff5b73;
   --ok:#7be37b;
 
-  /* Колбочки */
+  /* Колбочки — палитра из 11 цветов. Поддерживает уровни с
+     filled до 11 колб (макс. конфиг: 12 колб, 1 пустая). */
   --c-pink:#ff5fa2;
   --c-orange:#ff8a2b;
   --c-yellow:#ffd23f;
@@ -34,6 +35,9 @@
   --c-blue:#3a8bff;
   --c-purple:#b65bff;
   --c-crimson:#ef3a5d;
+  --c-cyan:#22ddff;
+  --c-mint:#5be3a0;
+  --c-coral:#ff7b6b;
 }
 
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
@@ -217,6 +221,9 @@ body{
 .bottle .layer.c-blue   {background:var(--c-blue)}
 .bottle .layer.c-purple {background:var(--c-purple)}
 .bottle .layer.c-crimson{background:var(--c-crimson)}
+.bottle .layer.c-cyan   {background:var(--c-cyan)}
+.bottle .layer.c-mint   {background:var(--c-mint)}
+.bottle .layer.c-coral  {background:var(--c-coral)}
 .bottle .layer.is-new{animation:layerDrop .35s cubic-bezier(.4,0,.25,1)}
 @keyframes layerDrop{
   0%{transform:translateY(-20px);opacity:.0}
@@ -595,37 +602,48 @@ window.Solver = (() => {
    под палитру 8 цветов и ограничение "2-4 цвета максимум".
    ============================================================ */
 window.Levels = (() => {
-  const PALETTE = ['pink','orange','yellow','lime','teal','blue','purple','crimson'];
+  // 11 цветов — поддерживает layouts до 12 колб (1 пустая, 11 цветов).
+  const PALETTE = [
+    'pink','orange','yellow','lime','teal','blue','purple','crimson',
+    'cyan','mint','coral',
+  ];
 
-  // 10 default levels. `bottles` оставляем null — генерируются по seed
-  // (детерминированно) через random-tuned. Для L1-L3 после первой генерации
-  // можно закоммитить полученный bottles прямо сюда, чтобы старт был мгновенным.
-  // Таймауты на уровнях держим короткими (≤ 3000мс). Если random-tuned не
-  // успевает попасть в target — срабатывает fallback на reverse-shuffle,
-  // который гарантирует решаемость по построению. Игра не блокируется
-  // надолго на старте уровня. Для production-баланса конкретные раскладки
-  // следует прописывать в `bottles: [...]` явно (см. docs/LEVELS.md).
+  // 10 default levels. КРИТИЧЕСКОЕ ПРАВИЛО:
+  //   colors_count === filled === sticks - emptyStick
+  // Каждый цвет занимает ровно ОДНУ полную колбу (capacity единиц).
+  // Никогда не должно быть 2+ полных колб одного цвета.
+  // Прогрессия — увеличение sticks/capacity/colors, всегда emptyStick=1.
   const DEFAULT_LEVELS = [
-    { level: 1,  sticks: 3,  capacity: 3, emptyStick: 1, difficulty: 4,
-      colours: ['pink','blue'],                          generator:'random-tuned', tuningTimeoutMs: 2000, seed: 1007, easyMode:true, distinctLayers:true },
-    { level: 2,  sticks: 4,  capacity: 3, emptyStick: 1, difficulty: 6,
-      colours: ['pink','blue','lime'],                   generator:'random-tuned', tuningTimeoutMs: 2500, seed: 2007, easyMode:true, distinctLayers:true },
-    { level: 3,  sticks: 5,  capacity: 3, emptyStick: 1, difficulty: 9,
-      colours: ['pink','blue','lime','purple'],          generator:'random-tuned', tuningTimeoutMs: 3000, seed: 3007, easyMode:true, distinctLayers:true },
-    { level: 4,  sticks: 5,  capacity: 4, emptyStick: 1, difficulty: 12,
-      colours: ['pink','orange','teal','purple'],        generator:'random-tuned', tuningTimeoutMs: 3000, seed: 4007, easyMode:true, distinctLayers:true },
-    { level: 5,  sticks: 6,  capacity: 4, emptyStick: 2, difficulty: 14,
-      colours: ['pink','yellow','blue','crimson'],       generator:'random-tuned', tuningTimeoutMs: 3000, seed: 5007, easyMode:true, distinctLayers:true },
-    { level: 6,  sticks: 7,  capacity: 4, emptyStick: 3, difficulty: 16,
-      colours: ['orange','lime','blue','purple'],        generator:'reverse-shuffle', seed: 6007 },
-    { level: 7,  sticks: 7,  capacity: 4, emptyStick: 3, difficulty: 18,
-      colours: ['pink','teal','yellow','crimson'],       generator:'reverse-shuffle', seed: 7007 },
-    { level: 8,  sticks: 9,  capacity: 4, emptyStick: 1, difficulty: 20,
-      colours: ['pink','orange','blue','lime'],          generator:'reverse-shuffle', seed: 8007 },
-    { level: 9,  sticks: 10, capacity: 4, emptyStick: 2, difficulty: 22,
-      colours: ['teal','yellow','purple','crimson'],     generator:'reverse-shuffle', seed: 9007 },
-    { level: 10, sticks: 12, capacity: 4, emptyStick: 4, difficulty: 24,
-      colours: ['pink','orange','blue','purple'],        generator:'reverse-shuffle', seed:10007 },
+    { level: 1,  sticks: 3,  capacity: 3, emptyStick: 1, difficulty: 5,
+      colours: ['pink','blue'],
+      generator:'reverse-shuffle', seed: 1007 },
+    { level: 2,  sticks: 4,  capacity: 3, emptyStick: 1, difficulty: 8,
+      colours: ['pink','blue','lime'],
+      generator:'reverse-shuffle', seed: 2007 },
+    { level: 3,  sticks: 5,  capacity: 3, emptyStick: 1, difficulty: 11,
+      colours: ['pink','blue','lime','purple'],
+      generator:'reverse-shuffle', seed: 3007 },
+    { level: 4,  sticks: 6,  capacity: 3, emptyStick: 1, difficulty: 14,
+      colours: ['pink','orange','teal','purple','yellow'],
+      generator:'reverse-shuffle', seed: 4007 },
+    { level: 5,  sticks: 7,  capacity: 3, emptyStick: 1, difficulty: 16,
+      colours: ['pink','orange','yellow','lime','blue','crimson'],
+      generator:'reverse-shuffle', seed: 5007 },
+    { level: 6,  sticks: 8,  capacity: 3, emptyStick: 1, difficulty: 18,
+      colours: ['pink','orange','yellow','lime','teal','blue','purple'],
+      generator:'reverse-shuffle', seed: 6007 },
+    { level: 7,  sticks: 9,  capacity: 4, emptyStick: 1, difficulty: 22,
+      colours: ['pink','orange','yellow','lime','teal','blue','purple','crimson'],
+      generator:'reverse-shuffle', seed: 7007 },
+    { level: 8,  sticks: 10, capacity: 4, emptyStick: 1, difficulty: 26,
+      colours: ['pink','orange','yellow','lime','teal','blue','purple','crimson','cyan'],
+      generator:'reverse-shuffle', seed: 8007 },
+    { level: 9,  sticks: 11, capacity: 4, emptyStick: 1, difficulty: 30,
+      colours: ['pink','orange','yellow','lime','teal','blue','purple','crimson','cyan','mint'],
+      generator:'reverse-shuffle', seed: 9007 },
+    { level: 10, sticks: 12, capacity: 4, emptyStick: 1, difficulty: 34,
+      colours: ['pink','orange','yellow','lime','teal','blue','purple','crimson','cyan','mint','coral'],
+      generator:'reverse-shuffle', seed:10007 },
   ];
 
   const runtimeOverrides = {};
@@ -635,45 +653,36 @@ window.Levels = (() => {
   function getLevelCount() { return DEFAULT_LEVELS.length; }
 
   /**
-   * Endless mode. Все уровни L11+ — процедурные. Растим сложность по тирам,
-   * но всегда держим 4 цвета максимум (требование задачи "2-4 максимум").
-   *
-   * Tier-таблица: каждые 4 endless-уровня шаг сложности увеличивается.
-   * filled = sticks - emptyStick, делится на colors нацело (необходимо
-   * для того, чтобы каждый цвет в финале занимал целое число полных колб).
+   * Endless mode (L11+). Уровни процедурные. emptyStick всегда = 1,
+   * colors = filled = sticks - 1, каждый цвет занимает ровно 1 полную колбу.
+   * Сложность растёт через увеличение sticks/capacity и difficulty (число
+   * требуемых ходов в reverse-shuffle).
    */
   const ENDLESS_TIERS = [
-    // tier 0: 4 колбы на цвет → каждый цвет 1 полная колба
-    { sticks: 7,  capacity: 4, emptyStick: 3, colors: 4, difficulty: 18 },
-    { sticks: 8,  capacity: 4, emptyStick: 4, colors: 4, difficulty: 20 },
-    { sticks: 9,  capacity: 4, emptyStick: 1, colors: 4, difficulty: 22 }, // 2 колбы на цвет
-    { sticks: 10, capacity: 4, emptyStick: 2, colors: 4, difficulty: 24 }, // 2 колбы на цвет
-    // tier 1: усложняем
-    { sticks: 11, capacity: 4, emptyStick: 3, colors: 4, difficulty: 26 },
-    { sticks: 12, capacity: 4, emptyStick: 4, colors: 4, difficulty: 28 },
-    { sticks: 12, capacity: 3, emptyStick: 0, colors: 4, difficulty: 30 }, // 12*3/4=9 — целое
-    { sticks: 9,  capacity: 4, emptyStick: 1, colors: 4, difficulty: 32 },
+    { sticks: 12, capacity: 4, emptyStick: 1, difficulty: 38 },
+    { sticks: 12, capacity: 4, emptyStick: 1, difficulty: 42 },
+    { sticks: 12, capacity: 4, emptyStick: 1, difficulty: 46 },
+    { sticks: 12, capacity: 4, emptyStick: 1, difficulty: 50 },
   ];
 
   const _endlessCache = {};
   function generateEndlessConfig(n) {
     const tierIdx = (n - DEFAULT_LEVELS.length - 1) % ENDLESS_TIERS.length;
     const tier = ENDLESS_TIERS[tierIdx];
-    const palette = PALETTE.slice();
-    shuffleInPlace(palette, Math.random);
-    const colours = palette.slice(0, tier.colors);
+    const filled = tier.sticks - tier.emptyStick;
+    // Берём ровно `filled` уникальных цветов из палитры (детерминированно
+    // по seed — иначе один и тот же N будет рисовать разные цвета между
+    // вызовами рендера).
     const seed = (Math.random() * 1e9) | 0;
+    const rng = mulberry32(seed);
+    const colours = shuffleInPlace([...PALETTE], rng).slice(0, filled);
     return {
       sticks: tier.sticks,
       capacity: tier.capacity,
       emptyStick: tier.emptyStick,
       difficulty: tier.difficulty,
       colours,
-      // Используем reverse-shuffle: на больших полях random-tuned + easyMode
-      // не успевает за разумное время. reverse-shuffle гарантирует решаемость
-      // и работает в миллисекундах, даже на 12×4.
       generator: 'reverse-shuffle',
-      distinctLayers: true,
       seed,
       endless: true,
     };
@@ -743,19 +752,38 @@ window.Levels = (() => {
     return [...filled, ...empty];
   }
 
+  /**
+   * Подбор цветов под filled: ровно `filled` уникальных цветов.
+   * Если params.colours валиден (массив длины ≥ filled, без повторов) —
+   * берём первые filled. Иначе детерминированно сэмплим из палитры.
+   * Кидает ошибку, если палитра недостаточна.
+   */
+  function pickColours(params, filled, rng) {
+    if (filled > PALETTE.length) {
+      throw new Error(`Палитра содержит ${PALETTE.length} цветов, а нужно ${filled}`);
+    }
+    if (Array.isArray(params.colours)
+        && params.colours.length >= filled
+        && new Set(params.colours.slice(0, filled)).size === filled
+        && params.colours.slice(0, filled).every(c => PALETTE.includes(c))) {
+      return params.colours.slice(0, filled);
+    }
+    return shuffleInPlace([...PALETTE], rng).slice(0, filled);
+  }
+
   // -------- Generator V1: reverse-shuffle from solved --------
   function reverseShuffleFromSolved(params) {
     const { sticks, capacity, emptyStick, level } = params;
     const filled = sticks - emptyStick;
     const seed = (params.seed != null ? params.seed | 0 : (level | 0) * 1000 + 7);
     const rng = mulberry32(seed);
-    const colours = (Array.isArray(params.colours) && params.colours.length >= 1)
-      ? params.colours.slice(0, Math.min(filled, params.colours.length))
-      : shuffleInPlace([...PALETTE], rng).slice(0, Math.min(filled, PALETTE.length));
+    const colours = pickColours(params, filled, rng);
+    // Solved layout: каждая filled-колба = одна полная (capacity штук) одного цвета.
+    // Это и есть инвариант "1 цвет = 1 полная колба".
     const state = [];
     for (let i = 0; i < filled; i++) {
       const arr = [];
-      for (let j = 0; j < capacity; j++) arr.push(colours[i % colours.length]);
+      for (let j = 0; j < capacity; j++) arr.push(colours[i]);
       state.push(arr);
     }
     for (let i = 0; i < emptyStick; i++) state.push([]);
@@ -885,15 +913,12 @@ window.Levels = (() => {
   function randomLayout(params, rng) {
     const { sticks, capacity, emptyStick } = params;
     const filled = sticks - emptyStick;
-    let colours = (Array.isArray(params.colours) && params.colours.length >= 1)
-      ? params.colours.slice()
-      : PALETTE.slice(0, Math.min(filled, PALETTE.length));
-    // Если цветов меньше чем filled — повторяем
-    while (colours.length < filled) colours = colours.concat(colours).slice(0, filled);
-    colours = colours.slice(0, filled);
+    // Ровно `filled` уникальных цветов: каждый цвет = capacity пончиков
+    // = ровно 1 полная колба в решённом состоянии.
+    const colours = pickColours(params, filled, rng);
 
-    const distinct = params.distinctLayers === true && new Set(colours).size === filled;
-    if (distinct) {
+    if (params.distinctLayers === true) {
+      // Каждый слой = пермутация всех `filled` цветов (без повторов в слое).
       const state = [];
       for (let i = 0; i < filled; i++) state.push([]);
       for (let layer = 0; layer < capacity; layer++) {
@@ -903,13 +928,9 @@ window.Levels = (() => {
       for (let i = 0; i < emptyStick; i++) state.push([]);
       return state;
     }
-    // distribute donuts: каждый цвет имеет (filled*capacity/colors_count) единиц
-    const colorsUniq = [...new Set(colours)];
-    const total = filled * capacity;
-    const perColor = Math.floor(total / colorsUniq.length);
+    // Default: каждый цвет имеет ровно `capacity` пончиков; раскладка перемешана.
     const flat = [];
-    for (const c of colorsUniq) for (let i = 0; i < perColor; i++) flat.push(c);
-    while (flat.length < total) flat.push(colorsUniq[flat.length % colorsUniq.length]);
+    for (const c of colours) for (let i = 0; i < capacity; i++) flat.push(c);
     shuffleInPlace(flat, rng);
     const state = [];
     for (let i = 0; i < filled; i++) state.push(flat.slice(i * capacity, (i + 1) * capacity));
@@ -1357,13 +1378,14 @@ window.DevPanel = (() => {
       <div class="dev-row"><label>Колбочки (sticks)</label><input type="number" id="dv-sticks" min="3" max="13" value="${sticks}"></div>
       <div class="dev-row"><label>Ёмкость (capacity)</label><input type="number" id="dv-cap" min="2" max="6" value="${capacity}"></div>
       <div class="dev-row"><label>Пустых (emptyStick)</label><input type="number" id="dv-empty" min="0" max="13" value="${emptyStick}"></div>
-      <div class="dev-row"><label>Цвета (2-4)</label>
+      <div class="dev-row"><label>Цвета (=filled)</label>
         <div class="swatches" id="dv-swatches">
           ${Levels.PALETTE.map(c => `
             <div class="sw ${colourSet.has(c) ? 'on' : ''}" data-c="${c}" style="--sw-color:var(--c-${c})" title="${c}"></div>
           `).join('')}
         </div>
       </div>
+      <div class="dev-row"><label></label><span style="color:var(--text-dim);font-size:11px">Должно быть ровно <b id="dv-need-colors" style="color:var(--accent)">${sticks - emptyStick}</b> цветов (= sticks − emptyStick)</span></div>
       <div class="dev-row"><label>Генератор</label>
         <select id="dv-gen">
           <option value="reverse-shuffle" ${generator==='reverse-shuffle'?'selected':''}>reverse-shuffle (V1)</option>
@@ -1385,18 +1407,34 @@ window.DevPanel = (() => {
       </div>
       <div class="status" id="dv-status">Готов к генерации.</div>
     `;
-    // Цветовые свотчи — toggle on click, лимит 2-4
+    // Цветовые свотчи — toggle on click. Лимит — `filled` (число НЕ-пустых
+    // колб): caclulated dynamically, обновляется при изменении sticks/empty.
     $body.querySelectorAll('.sw').forEach(sw => {
       sw.addEventListener('click', () => {
         sw.classList.toggle('on');
-        const cur = $body.querySelectorAll('.sw.on').length;
-        if (cur > 4) sw.classList.remove('on');
+        updateColourNeedHint();
       });
+    });
+    // Динамически обновлять подсказку «нужно X цветов» при смене sticks/empty
+    ['dv-sticks','dv-empty'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.addEventListener('input', updateColourNeedHint);
     });
     document.getElementById('dv-generate').addEventListener('click', onGenerate);
     document.getElementById('dv-save').addEventListener('click', onSave);
     document.getElementById('dv-reset').addEventListener('click', onReset);
     document.getElementById('dv-copy').addEventListener('click', onCopy);
+  }
+
+  function updateColourNeedHint() {
+    const sticks = +document.getElementById('dv-sticks').value || 0;
+    const empty  = +document.getElementById('dv-empty').value || 0;
+    const need = Math.max(0, sticks - empty);
+    const have = $body.querySelectorAll('.sw.on').length;
+    const el = document.getElementById('dv-need-colors');
+    if (!el) return;
+    el.textContent = need;
+    el.style.color = have === need ? 'var(--ok)' : 'var(--accent)';
   }
 
   function readForm() {
@@ -1424,12 +1462,15 @@ window.DevPanel = (() => {
 
   function onGenerate() {
     const params = readForm();
-    if (params.colours.length < 2) { setStatus('Выбери минимум 2 цвета', 'err'); return; }
-    if (params.colours.length > 4) { setStatus('Максимум 4 цвета', 'err'); return; }
     const filled = params.sticks - params.emptyStick;
-    if (filled <= 0) { setStatus('Слишком много пустых колб', 'err'); return; }
-    if ((filled * params.capacity) % params.colours.length !== 0) {
-      setStatus(`Внимание: filled*capacity (${filled * params.capacity}) не делится на ${params.colours.length} цветов нацело — баланс будет неровным.`);
+    if (filled <= 0) { setStatus('Слишком много пустых колб (filled ≤ 0)', 'err'); return; }
+    if (params.colours.length !== filled) {
+      setStatus(`Нужно ровно ${filled} цветов (sticks − emptyStick), выбрано ${params.colours.length}`, 'err');
+      return;
+    }
+    if (filled > Levels.PALETTE.length) {
+      setStatus(`Палитра содержит только ${Levels.PALETTE.length} цветов, а нужно ${filled}`, 'err');
+      return;
     }
     setStatus('Генерация...');
     setTimeout(() => {
