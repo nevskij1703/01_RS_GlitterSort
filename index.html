@@ -1081,6 +1081,110 @@ window.Persist = (() => {
 })();
 
 /* ============================================================
+   [ADS] — рекламная абстракция с тремя backend'ами:
+     1. Native — html2apk wrapper экспонирует window.YandexAds и
+        вызывает window.__yandexAdsCallback по результатам.
+     2. YaGames — window.YaGames для веб-публикации на Yandex Games.
+     3. Mock — для dev-режима (открытие index.html файлом).
+   Контракт нативного wrapper'а описан в docs/ADS.md.
+   ============================================================ */
+window.Ads = (() => {
+  // Ad-unit IDs. Замени на свои в Yandex Partner перед сборкой релизного APK.
+  const UNIT_INTERSTITIAL = 'R-M-DEMO-1';
+  const UNIT_REWARDED     = 'R-M-DEMO-2';
+
+  let backend = 'mock';
+  let ysdk = null;
+  // Хэндлеры для callback'ов от нативного бриджа
+  let pendingInterstitial = null;
+  let pendingRewarded = null;
+
+  function init() {
+    if (window.YandexAds && typeof window.YandexAds.showInterstitial === 'function') {
+      backend = 'native';
+      window.__yandexAdsCallback = (kind, event) => {
+        if (kind === 'interstitial' && pendingInterstitial) {
+          pendingInterstitial();
+          pendingInterstitial = null;
+        }
+        if (kind === 'rewarded' && pendingRewarded) {
+          pendingRewarded(event === 'rewarded');
+          pendingRewarded = null;
+        }
+      };
+      console.log('[Ads] backend=native (YandexAds bridge)');
+      return Promise.resolve();
+    }
+    if (window.YaGames && typeof window.YaGames.init === 'function') {
+      return window.YaGames.init().then(s => {
+        ysdk = s;
+        backend = 'yagames';
+        console.log('[Ads] backend=yagames');
+      }).catch(err => {
+        console.warn('[Ads] YaGames init failed, falling back to mock', err);
+        backend = 'mock';
+      });
+    }
+    backend = 'mock';
+    console.log('[Ads] backend=mock (dev)');
+    return Promise.resolve();
+  }
+
+  function showInterstitial() {
+    if (backend === 'native') {
+      return new Promise(resolve => {
+        pendingInterstitial = resolve;
+        try { window.YandexAds.showInterstitial(UNIT_INTERSTITIAL); }
+        catch (e) { console.warn('[Ads] native interstitial failed', e); pendingInterstitial = null; resolve(); }
+      });
+    }
+    if (backend === 'yagames' && ysdk) {
+      return new Promise(resolve => {
+        ysdk.adv.showFullscreenAdv({
+          callbacks: { onClose: () => resolve(), onError: () => resolve() },
+        });
+      });
+    }
+    // mock
+    return new Promise(resolve => {
+      console.log('[Ads] showInterstitial mock');
+      setTimeout(resolve, 600);
+    });
+  }
+
+  function showRewarded() {
+    if (backend === 'native') {
+      return new Promise(resolve => {
+        pendingRewarded = (rewarded) => resolve({ rewarded });
+        try { window.YandexAds.showRewarded(UNIT_REWARDED); }
+        catch (e) { console.warn('[Ads] native rewarded failed', e); pendingRewarded = null; resolve({ rewarded: false }); }
+      });
+    }
+    if (backend === 'yagames' && ysdk) {
+      return new Promise(resolve => {
+        let gotReward = false;
+        ysdk.adv.showRewardedVideo({
+          callbacks: {
+            onRewarded: () => { gotReward = true; },
+            onClose: () => resolve({ rewarded: gotReward }),
+            onError: () => resolve({ rewarded: false }),
+          },
+        });
+      });
+    }
+    // mock — всегда даём reward
+    return new Promise(resolve => {
+      console.log('[Ads] showRewarded mock — granting reward');
+      setTimeout(() => resolve({ rewarded: true }), 800);
+    });
+  }
+
+  function getBackend() { return backend; }
+
+  return { init, showInterstitial, showRewarded, getBackend, UNIT_INTERSTITIAL, UNIT_REWARDED };
+})();
+
+/* ============================================================
    [RENDER] — отрисовка колбочек, HUD, модалок.
    ============================================================ */
 window.Render = (() => {
@@ -1161,8 +1265,10 @@ window.App = (() => {
 
   function start() {
     const persisted = Persist.load();
-    loadLevel(persisted.level || 1);
-    wireEvents();
+    Ads.init().finally(() => {
+      loadLevel(persisted.level || 1);
+      wireEvents();
+    });
   }
 
   function loadLevel(levelNum) {
@@ -1237,18 +1343,32 @@ window.App = (() => {
 
   function onNext() {
     transferLocked = false;
+    const counter = Persist.bumpInterstitialCounter();
     const persisted = Persist.load();
-    loadLevel(persisted.level);
+    const nextLevel = persisted.level;
+    if (Persist.shouldShowInterstitial(counter)) {
+      Render.toast('Реклама...', 1200);
+      Ads.showInterstitial().finally(() => loadLevel(nextLevel));
+    } else {
+      loadLevel(nextLevel);
+    }
   }
 
   function onBonus() {
-    // Заглушка — реальная реклама будет в следующем коммите.
-    if (State.addBonusBottle()) {
-      Render.renderAll();
-      Render.toast('+1 колба (бонус)');
-    } else {
-      Render.toast('Уже использована');
-    }
+    const s = State.get();
+    if (!s || s.bonusUsedThisLevel) { Render.toast('Бонус уже использован'); return; }
+    if (s.sticks.length >= 13) { Render.toast('Больше колб не помещается'); return; }
+    Render.toast('Реклама...', 1500);
+    Ads.showRewarded().then(res => {
+      if (!res || !res.rewarded) { Render.toast('Реклама не была досмотрена'); return; }
+      if (State.addBonusBottle()) {
+        const persisted = Persist.load();
+        persisted.stats.bonusUsed = (persisted.stats.bonusUsed || 0) + 1;
+        Persist.save(persisted);
+        Render.renderAll();
+        Render.toast('+1 колба (бонус)');
+      }
+    });
   }
 
   return { start, loadLevel };
