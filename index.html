@@ -821,7 +821,12 @@ window.Levels = (() => {
       if (state[b].length >= capacity) continue;
       if (lastMove && lastMove.from === b && lastMove.to === a) continue;
       if (lastMove && lastMove.from === a && lastMove.to === b) continue;
-      const donut = state[a].pop();
+      const donut = state[a][state[a].length - 1];
+      // Решаемость forward-инверсии: после reverse-pop источник либо пустеет
+      // полностью, либо его новый верх того же цвета. Иначе forward inverse
+      // попытался бы класть `donut` обратно на чужой цвет — невалидно.
+      if (state[a].length > 1 && state[a][state[a].length - 2] !== donut) continue;
+      state[a].pop();
       state[b].push(donut);
       const h = hashState(state);
       if (visited.has(h)) { state[b].pop(); state[a].push(donut); continue; }
@@ -1420,6 +1425,23 @@ window.DevPanel = (() => {
         <button id="dv-copy">📋 Copy JSON</button>
       </div>
       <div class="status" id="dv-status">Готов к генерации.</div>
+
+      <div class="dev-row" style="margin-top:12px;padding-top:10px;border-top:1px solid rgba(255,255,255,.08)">
+        <label style="font-weight:600;color:var(--accent)">🧠 Симуляция</label>
+        <span style="color:var(--text-dim);font-size:11px">BFS-решатель + автопроход текущей раскладки</span>
+      </div>
+      <div class="actions">
+        <button id="dv-analyze">🔍 Анализ</button>
+        <button id="dv-autoplay" class="primary">▶ Автопроход</button>
+        <button id="dv-stop">⏹ Стоп</button>
+      </div>
+      <div class="dev-row">
+        <label>Тайм-аут BFS (мс)</label>
+        <input type="number" id="dv-bfs-timeout" min="100" max="30000" step="500" value="3000">
+        <label style="flex:0 0 auto">Шаг авто (мс)</label>
+        <input type="number" id="dv-autoplay-delay" min="100" max="3000" step="50" value="450" style="flex:0 0 80px">
+      </div>
+      <div class="status" id="dv-sim-status">Нажми «Анализ», чтобы найти оптимальный путь.</div>
     `;
     // Цветовые свотчи — toggle on click. Лимит — `filled` (число НЕ-пустых
     // колб): caclulated dynamically, обновляется при изменении sticks/empty.
@@ -1438,7 +1460,123 @@ window.DevPanel = (() => {
     document.getElementById('dv-save').addEventListener('click', onSave);
     document.getElementById('dv-reset').addEventListener('click', onReset);
     document.getElementById('dv-copy').addEventListener('click', onCopy);
+    document.getElementById('dv-analyze').addEventListener('click', onAnalyze);
+    document.getElementById('dv-autoplay').addEventListener('click', onAutoplay);
+    document.getElementById('dv-stop').addEventListener('click', onStop);
   }
+
+  // ----- Симуляция -----
+  let _autoplay = { running: false, abort: false };
+
+  function setSimStatus(msg, kind) {
+    const el = document.getElementById('dv-sim-status');
+    if (!el) return;
+    el.textContent = msg;
+    el.style.color = kind === 'err' ? 'var(--danger)' : kind === 'ok' ? 'var(--ok)' : 'var(--text-dim)';
+  }
+
+  function onAnalyze() {
+    const s = State.get();
+    if (!s) return;
+    if (Solver.isSolved(s.sticks, s.capacity)) {
+      setSimStatus('Уровень уже решён.', 'ok');
+      return;
+    }
+    const tBfs = +document.getElementById('dv-bfs-timeout').value || 3000;
+    setSimStatus('BFS-поиск...');
+    setTimeout(() => {
+      const t0 = performance.now();
+      const sol = Solver.findShortestPath(s.sticks, s.capacity, tBfs, { multiTransfer: true });
+      const tDead = Math.min(2000, Math.floor(tBfs / 3));
+      const dead = Solver.findReachableDeadEnds(s.sticks, s.capacity, { multiTransfer: true, timeLimitMs: tDead });
+      const ms = (performance.now() - t0) | 0;
+      if (sol.length === null) {
+        setSimStatus(`✗ Решение не найдено за ${tBfs}мс (explored=${sol.explored}, exhausted=${sol.exhausted}).`, 'err');
+        return;
+      }
+      const firstMove = sol.firstMove
+        ? `${sol.firstMove.from}→${sol.firstMove.to}×${sol.firstMove.count}`
+        : '—';
+      const deadStr = dead.exhausted
+        ? (dead.ok ? 'без тупиков ✓' : `тупиков=${dead.deadEnds}/${dead.reachable} ✗`)
+        : 'dead-end check: timeout';
+      setSimStatus(
+        `✓ optimal=${sol.length} ходов, первый=${firstMove}\n` +
+        `explored=${sol.explored} states, ${deadStr}, ${ms}мс`,
+        sol.length !== null ? 'ok' : ''
+      );
+    }, 30);
+  }
+
+  async function onAutoplay() {
+    const s = State.get();
+    if (!s) return;
+    if (_autoplay.running) { setSimStatus('Уже играет — нажми «Стоп».', 'err'); return; }
+    if (Solver.isSolved(s.sticks, s.capacity)) {
+      setSimStatus('Уровень уже решён.', 'ok');
+      return;
+    }
+    const tBfs = +document.getElementById('dv-bfs-timeout').value || 3000;
+    const delay = Math.max(80, +document.getElementById('dv-autoplay-delay').value || 450);
+    _autoplay.running = true;
+    _autoplay.abort = false;
+    setSimStatus('▶ Автопроход начался...');
+    let steps = 0;
+    const startMoves = s.moves;
+    try {
+      while (!_autoplay.abort) {
+        const cur = State.get();
+        if (!cur) break;
+        if (Solver.isSolved(cur.sticks, cur.capacity)) break;
+        const sol = Solver.findShortestPath(cur.sticks, cur.capacity, tBfs, { multiTransfer: true });
+        if (!sol || sol.firstMove == null) {
+          setSimStatus(`✗ Симулятор не нашёл следующий ход (после ${steps} шагов).`, 'err');
+          _autoplay.running = false;
+          return;
+        }
+        const { from, to } = sol.firstMove;
+        // Симулируем клик через DOM — App.onStickClick это обработает,
+        // включая isWon → showWin модал.
+        await clickStickViaDOM(from);
+        await sleep(60);
+        await clickStickViaDOM(to);
+        steps++;
+        setSimStatus(`▶ Шаг ${steps}: ${from}→${to}×${sol.firstMove.count}, осталось ~${(sol.length - 1)|0} ходов`);
+        await sleep(delay);
+      }
+      const cur = State.get();
+      const totalMoves = cur ? cur.moves - startMoves : steps;
+      if (cur && Solver.isSolved(cur.sticks, cur.capacity)) {
+        setSimStatus(`✓ Победа! ${totalMoves} ходов сделано автопроходом.`, 'ok');
+      } else if (_autoplay.abort) {
+        setSimStatus(`⏹ Остановлено на ${steps} шаге.`);
+      }
+    } catch (e) {
+      console.error(e);
+      setSimStatus('Ошибка: ' + e.message, 'err');
+    } finally {
+      _autoplay.running = false;
+    }
+  }
+
+  function onStop() {
+    if (_autoplay.running) {
+      _autoplay.abort = true;
+    } else {
+      setSimStatus('Автопроход не запущен.');
+    }
+  }
+
+  function clickStickViaDOM(idx) {
+    return new Promise(resolve => {
+      const sticks = document.getElementById('sticks');
+      if (!sticks || !sticks.children[idx]) { resolve(); return; }
+      sticks.children[idx].click();
+      requestAnimationFrame(() => resolve());
+    });
+  }
+
+  function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
   function updateColourNeedHint() {
     const sticks = +document.getElementById('dv-sticks').value || 0;
