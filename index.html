@@ -13,13 +13,14 @@
    ============================================================ */
 
 :root{
-  --bg-1:#1a1238;
-  --bg-2:#2a1858;
-  --bg-3:#3a1d72;
+  /* Dark navy palette по референсу Get Color (Бутылочки и Пробирки). */
+  --bg-1:#0d1937;
+  --bg-2:#15225a;
+  --bg-3:#1d2f7a;
   --panel:rgba(255,255,255,.07);
   --panel-border:rgba(255,255,255,.14);
   --text:#f1eaff;
-  --text-dim:#a59bd1;
+  --text-dim:#9eb4dc;
   --accent:#ffd86b;
   --accent-2:#ff7ac6;
   --danger:#ff5b73;
@@ -144,23 +145,25 @@ body{
    с обычным border).
 */
 .bottle{
-  --flask-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 80 192' preserveAspectRatio='none'><path d='M22 0 L58 0 L58 18 C58 22 76 26 80 34 L80 164 C80 180 70 192 40 192 C10 192 0 180 0 164 L0 34 C4 26 22 22 22 18 Z' fill='black'/></svg>");
+  /* Профиль колбы по референсу Get Color: прямой корпус ~88% ширины,
+     короткие плавные плечики, узкое горлышко (35%), плоско-округлое дно. */
+  --flask-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 80 192' preserveAspectRatio='none'><path d='M26 0 L54 0 L54 8 C54 12 75 14 75 30 L75 162 C75 178 70 192 60 192 L20 192 C10 192 5 178 5 162 L5 30 C5 14 26 12 26 8 Z' fill='black'/></svg>");
   position:relative;
   width:100%;
   max-width:78px;
   aspect-ratio:80 / 192;
   cursor:pointer;
-  background:linear-gradient(180deg, rgba(255,255,255,.10), rgba(255,255,255,.04));
+  background:rgba(255,255,255,.03);
   -webkit-mask:var(--flask-mask) center / 100% 100% no-repeat;
           mask:var(--flask-mask) center / 100% 100% no-repeat;
-  transition:transform .22s cubic-bezier(.4,0,.25,1), filter .15s;
-  /* Контур + тень через стек drop-shadow'ов (mask отключает border). */
+  transition:transform .25s cubic-bezier(.3,0,.3,1), filter .15s;
+  /* Тонкая светло-голубая обводка + мягкая тень. */
   filter:
-    drop-shadow( 1px  0  0 rgba(255,255,255,.55))
-    drop-shadow(-1px  0  0 rgba(255,255,255,.55))
-    drop-shadow( 0  1px  0 rgba(255,255,255,.55))
-    drop-shadow( 0 -1px  0 rgba(255,255,255,.55))
-    drop-shadow(0 6px 12px rgba(0,0,0,.42));
+    drop-shadow( 1px  0  0 rgba(180,200,255,.6))
+    drop-shadow(-1px  0  0 rgba(180,200,255,.6))
+    drop-shadow( 0  1px  0 rgba(180,200,255,.6))
+    drop-shadow( 0 -1px  0 rgba(180,200,255,.6))
+    drop-shadow(0 4px 10px rgba(0,0,0,.5));
 }
 .bottle.selected{
   transform:translateY(-16px);
@@ -180,13 +183,13 @@ body{
     drop-shadow(0 6px 12px rgba(0,0,0,.42));
 }
 
-/* Контейнер слоёв — прижат к низу корпуса колбы (после плечиков ≈ 18%
+/* Контейнер слоёв — прижат к низу корпуса колбы (после плечиков ≈ 14%
    высоты mask'а). Сама форма уже обрезана mask'ом, layers могут идти на
    всю ширину — края подрежет mask автоматически. */
 .bottle .layers{
   position:absolute;
   left:0;right:0;bottom:0;
-  top:18%;
+  top:14%;
   display:flex;
   flex-direction:column-reverse;
   overflow:hidden;
@@ -198,6 +201,28 @@ body{
   flex:0 0 auto;
   height:calc(100% / var(--cap, 4));
   transition:background .15s ease;
+  position:relative;
+}
+/* «Глиттер» — россыпь мелких светлых искр в каждом слое жидкости. */
+.bottle .layer::after{
+  content:'';
+  position:absolute;inset:0;
+  background-image:
+    radial-gradient(circle 1.2px at 18% 22%, rgba(255,255,255,.65), transparent 2px),
+    radial-gradient(circle 1px   at 78% 35%, rgba(255,255,255,.55), transparent 1.8px),
+    radial-gradient(circle 1.4px at 42% 58%, rgba(255,255,255,.6),  transparent 2.2px),
+    radial-gradient(circle 1px   at 88% 70%, rgba(255,255,255,.55), transparent 1.8px),
+    radial-gradient(circle 1.2px at 28% 82%, rgba(255,255,255,.6),  transparent 2px),
+    radial-gradient(circle .9px  at 62% 18%, rgba(255,255,255,.5),  transparent 1.4px),
+    radial-gradient(circle 1px   at 12% 50%, rgba(255,255,255,.5),  transparent 1.6px),
+    radial-gradient(circle 1px   at 55% 88%, rgba(255,255,255,.55), transparent 1.6px);
+  pointer-events:none;
+  mix-blend-mode:overlay;
+  animation:glitterTwinkle 2.4s ease-in-out infinite;
+}
+@keyframes glitterTwinkle{
+  0%,100%{opacity:.75}
+  50%{opacity:1}
 }
 
 /* Анимация наполнения нового слоя — растёт сверху вниз. */
@@ -210,20 +235,8 @@ body{
   100%{transform:scaleY(1);opacity:1}
 }
 
-/* Внутренний блик колбы — узкая вертикальная полоса с левой стороны. */
-.bottle .gloss{
-  position:absolute;
-  left:12%;top:22%;
-  width:7%;height:62%;
-  background:linear-gradient(180deg,
-    rgba(255,255,255,.55) 0%,
-    rgba(255,255,255,.15) 55%,
-    rgba(255,255,255,0)   100%);
-  border-radius:50% / 100%;
-  filter:blur(.4px);
-  pointer-events:none;
-  z-index:3;
-}
+/* (Старый внутренний блик удалён — на референсе Get Color его нет.) */
+.bottle .gloss{display:none}
 
 /* Деревянная пробка — отдельный child, заполняет верхнюю узкую часть mask
    (от 0% до ~16% высоты). Mask автоматически обрезает её под форму neck. */
@@ -1658,6 +1671,17 @@ window.Render = (() => {
    * Новые layer'ы в приёмнике анимируются отдельно через CSS .is-new
    * (заполнение сверху-вниз), запускается renderAll'ом.
    */
+  /**
+   * Анимация переливания в стиле Get Color:
+   *   1. Источник поднимается ВЫСОКО над приёмником (translate-y чуть выше его горлышка)
+   *      и пристыковывается горлышком над neck'ом приёмника.
+   *   2. Наклоняется горлышком к приёмнику (~38° clockwise если dst справа,
+   *      counter-clockwise если слева). transform-origin = нижняя точка горлышка
+   *      колбы-источника, чтобы горлышко выглядело как «висит на оси».
+   *   3. Тонкая вертикальная струйка течёт ровно в горлышко приёмника.
+   *   4. Приёмник bumps, в нём появляется новый слой (.is-new).
+   *   5. Источник возвращается на исходную позицию.
+   */
   function animatePour(srcIdx, dstIdx, color) {
     return new Promise(resolve => {
       const src = $sticks.children[srcIdx];
@@ -1666,52 +1690,65 @@ window.Render = (() => {
 
       const srcRect = src.getBoundingClientRect();
       const dstRect = dst.getBoundingClientRect();
-      const dx = (dstRect.left + dstRect.width / 2) - (srcRect.left + srcRect.width / 2);
-      // подлёт: смещение по X почти к dst, но не до конца (чтобы горлышко
-      // зависло над приёмником, а не накрыло его)
-      const flyDx = dx + (dx > 0 ? -srcRect.width * 0.55 : srcRect.width * 0.55);
-      const flyDy = (dstRect.top - srcRect.top) - 6;
-      const tiltDir = dx > 0 ? -32 : 32;
+      // dstNeckX — центр горлышка приёмника (куда льётся)
+      const dstNeckX = dstRect.left + dstRect.width / 2;
+      const srcCx = srcRect.left + srcRect.width / 2;
+      const dx = dstNeckX - srcCx;
+      // Источник встаёт горлышком ровно над горлышком приёмника, но
+      // смещаемся в сторону на полширины — чтобы при наклоне горлышко source
+      // совпало с центром приёмника.
+      const offsetSign = dx >= 0 ? -1 : 1;
+      const flyDx = dx + offsetSign * srcRect.width * 0.45;
+      // Источник поднимается на 75% своей высоты выше горлышка приёмника
+      const flyDy = (dstRect.top - srcRect.top) - srcRect.height * 0.75;
+      const tiltDir = dx >= 0 ? 42 : -42;
 
       src.classList.add('pouring');
-      // Шаг 1: подлёт (без поворота)
-      src.style.transition = 'transform .28s cubic-bezier(.3,0,.3,1)';
-      src.style.transform = `translate(${flyDx}px, ${flyDy}px)`;
+      // Pivot — нижняя часть колбы-источника (чтобы при наклоне горлышко
+      // двигалось дугой над приёмником, а не вокруг центра).
+      src.style.transformOrigin = '50% 92%';
 
-      // Шаг 2: наклон (через 280мс, добавляется к translate)
+      // Шаг 1: подлёт (без наклона). Длится 320мс.
+      src.style.transition = 'transform .32s cubic-bezier(.3,0,.25,1)';
+      src.style.transform  = `translate(${flyDx}px, ${flyDy}px)`;
+
+      // Шаг 2: наклон через 320мс (~250мс)
       setTimeout(() => {
-        src.style.transition = 'transform .2s ease';
+        src.style.transition = 'transform .25s cubic-bezier(.4,0,.3,1)';
         src.style.transform  = `translate(${flyDx}px, ${flyDy}px) rotate(${tiltDir}deg)`;
 
-        // Шаг 3 (после наклона ~120мс): струйка + bump приёмника
+        // Шаг 3: струйка через 200мс после старта наклона
         setTimeout(() => {
           dst.classList.add('receiving-bump');
           const stream = document.createElement('div');
           stream.className = 'pour-stream';
           stream.style.setProperty('--stream-color', `var(--c-${color}, var(--accent))`);
+          // Струйка идёт ровно в neck приёмника, тонкая, длинная
           const liveDst = dst.getBoundingClientRect();
-          const xStream = liveDst.left + liveDst.width / 2 - 3.5;
-          const yTop = liveDst.top - 24;
-          const yBot = liveDst.top + liveDst.height * 0.35;
-          stream.style.left = xStream + 'px';
-          stream.style.top  = yTop + 'px';
+          const xStream = liveDst.left + liveDst.width / 2 - 3;
+          const yTop = liveDst.top - liveDst.height * 0.65;
+          const yBot = liveDst.top + liveDst.height * 0.18;
+          stream.style.left   = xStream + 'px';
+          stream.style.top    = yTop + 'px';
           stream.style.height = (yBot - yTop) + 'px';
+          stream.style.width  = '6px';
           document.body.appendChild(stream);
 
-          // Шаг 4: возврат источника (через ~280мс после старта потока)
+          // Шаг 4: возврат источника через 380мс (пока стрим ещё течёт)
           setTimeout(() => {
-            src.style.transition = 'transform .3s cubic-bezier(.4,0,.25,1)';
+            src.style.transition = 'transform .32s cubic-bezier(.4,0,.25,1)';
             src.style.transform  = '';
             setTimeout(() => {
               src.classList.remove('pouring');
               dst.classList.remove('receiving-bump');
               src.style.transition = '';
+              src.style.transformOrigin = '';
               stream.remove();
               resolve();
-            }, 320);
-          }, 280);
-        }, 120);
-      }, 280);
+            }, 340);
+          }, 380);
+        }, 200);
+      }, 320);
     });
   }
 
