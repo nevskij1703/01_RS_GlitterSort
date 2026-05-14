@@ -733,15 +733,29 @@ window.Levels = (() => {
    *   1. params.bottles given       → use verbatim
    *   2. params.generator='random-tuned' → V2 (random + BFS-tuned)
    *   3. otherwise                  → V1 (reverse-shuffle, default)
+   *
+   * Если генератор выдал уже решённую раскладку (бывает на маленьких
+   * полях, когда compact-pass случайно собирает всё обратно) — делаем
+   * до 6 ретраев с бампом seed и difficulty, чтобы старт уровня всегда
+   * требовал хотя бы один ход.
    */
   function generate(params) {
-    let bottles;
     if (Array.isArray(params.bottles)) {
-      bottles = params.bottles.map(s => [...s]);
-    } else if (params.generator === 'random-tuned') {
-      bottles = generateRandomTuned(params).bottles;
-    } else {
-      bottles = reverseShuffleFromSolved(params);
+      return permuteEmptyToEnd(params.bottles.map(s => [...s]));
+    }
+    let bottles;
+    const baseSeed = params.seed | 0;
+    const baseDiff = params.difficulty | 0;
+    for (let attempt = 0; attempt < 6; attempt++) {
+      const p = {
+        ...params,
+        seed: baseSeed + attempt * 113,
+        difficulty: baseDiff + attempt * 2,
+      };
+      bottles = params.generator === 'random-tuned'
+        ? generateRandomTuned(p).bottles
+        : reverseShuffleFromSolved(p);
+      if (!Solver.isSolved(bottles, p.capacity)) break;
     }
     return permuteEmptyToEnd(bottles);
   }
