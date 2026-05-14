@@ -74,34 +74,27 @@ body{
 }
 .level-title .lt-name{
   font-size:clamp(40px, 10vw, 64px);
-  font-weight:900;
-  letter-spacing:2px;
+  font-weight:700;
+  letter-spacing:1.5px;
   color:var(--text);
   text-transform:uppercase;
   line-height:1;
   cursor:default;
   user-select:none;
   -webkit-user-select:none;
-  /* Утолщение текста: обводка под заливкой (paint-order). */
-  -webkit-text-stroke:2.5px var(--text);
-  paint-order:stroke fill;
   text-shadow:0 4px 18px rgba(0,0,0,.55), 0 0 28px rgba(255,216,107,.2);
 }
 .level-title .lt-name b{
   color:var(--accent);
-  font-weight:900;
-  -webkit-text-stroke:2.5px var(--accent);
-  paint-order:stroke fill;
+  font-weight:700;
 }
 .level-title .lt-diff{
   font-size:26px;
-  font-weight:900;
+  font-weight:600;
   color:var(--diff-color, var(--text-dim));
-  letter-spacing:1.2px;
-  -webkit-text-stroke:2px var(--diff-color, var(--text-dim));
-  paint-order:stroke fill;
+  letter-spacing:.8px;
   text-shadow:0 2px 10px rgba(0,0,0,.45);
-  transition:color .2s ease, -webkit-text-stroke-color .2s ease;
+  transition:color .2s ease;
 }
 
 /* ===== PLAYFIELD ===== */
@@ -151,21 +144,25 @@ body{
   position:relative;
   width:100%;
   max-width:78px;
-  aspect-ratio:999 / 3443.5;
+  aspect-ratio:1051 / 3484.75;
   cursor:pointer;
-  color:#D9D9D9;
+  color:#ffffff;
   transition:transform .25s cubic-bezier(.3,0,.3,1), color .15s, filter .15s;
   filter:drop-shadow(0 4px 10px rgba(0,0,0,.5));
 }
-.bottle svg{width:100%;height:100%;display:block;overflow:visible}
+/* SVG и его дети — не ловят клики; клик идёт на .bottle div, чтобы зона
+   тапа точно совпадала с прямоугольником колбы и hit-area не зависела
+   от прозрачных областей SVG (горлышко, плечики). */
+.bottle svg{width:100%;height:100%;display:block;overflow:visible;pointer-events:none}
 .bottle.selected{
   transform:translateY(-16px);
   color:var(--accent);
   filter:drop-shadow(0 10px 16px rgba(255,216,107,.35));
 }
+/* .completed теперь меняет только обводку в зелёный — пробку не рисуем. */
 .bottle.completed{
   color:var(--ok);
-  filter:drop-shadow(0 6px 12px rgba(0,0,0,.42));
+  filter:drop-shadow(0 0 12px rgba(123,227,123,.5)) drop-shadow(0 6px 12px rgba(0,0,0,.42));
 }
 
 /* Анимация наполнения нового слоя — SVG rect растёт сверху вниз через scaleY. */
@@ -179,10 +176,8 @@ body{
   100%{transform:scaleY(1);opacity:1}
 }
 
-/* Деревянная пробка — SVG <rect> внутри bottle SVG; class bottle.completed
-   показывает её мгновенно (без поп-анимации). */
-.bottle svg .cork{opacity:0}
-.bottle.completed svg .cork{opacity:1}
+/* (Пробка убрана — на собранной колбе ничего не наносится сверху,
+   только меняется цвет обводки через .bottle.completed.) */
 /* (CSS-классы для цветов слоёв убраны — fill подставляется inline
    в SVG <rect> прямо в Render.buildBottle.) */
 
@@ -1510,23 +1505,19 @@ window.Render = (() => {
   // Слои жидкости: <rect> в области y∈[LIQ_TOP..LIQ_BOTTOM] с x/width
   // достаточно широкими, чтобы боковые края подрезались mask.
   const SVG_NS = 'http://www.w3.org/2000/svg';
-  // Корпус сжат на 25% относительно оригинала Figma: все y ≥ 640
-  // отображены как 640 + (y - 640) * 0.75. Горлышко и плечики
-  // (y < 640) не тронуты. ViewBox уменьшен с 4378 → 3443.5.
-  const SVG_VIEW = '0 0 999 3443.5';
-  const MASK_PATH = 'M875.078 16C929.684 16 969.036 68.3714 953.839 120.82L873.87 396.82C873.703 397.395 873.53 397.967 873.352 398.536C941.127 457.39 983.983 544.189 983.983 640.7493V3187C983.983 3319.96 840.267 3427.75 662.983 3427.75H336.983C159.7 3427.75 15.9837 3319.96 15.9834 3187V640.75C15.9834 545.367 57.8032 459.501 124.153 400.693C123.659 399.255 123.201 397.796 122.783 396.318L44.7168 120.318C29.9137 67.9829 69.2324 16 123.621 16H875.078Z';
-  const OUTLINE_PATH = 'M892.064 0C946.003 0 985.25 51.1814 971.257 103.273L892.888 395.002C958.129 455.122 999 541.288 999 637V3196.75C999 3333.025 851.702 3443.5 670 3443.5H329C147.298 3443.5 0 3333.025 0 3196.75V637C2.41415e-05 542.879 39.5238 457.99 102.879 398.022L25.459 102.801C11.8279 50.8222 51.0411 0 104.777 0H892.064ZM123.621 16C69.2324 16 29.9137 67.9829 44.7168 120.318L122.783 396.318C123.201 397.796 123.659 399.255 124.153 400.693C57.8032 459.501 15.9834 545.367 15.9834 640.75V3187C15.9837 3319.96 159.7 3427.75 336.983 3427.75H662.983C840.267 3427.75 983.983 3319.96 983.983 3187V640.7493C983.983 544.189 941.127 457.39 873.352 398.536C873.53 397.967 873.703 397.395 873.87 396.82L953.839 120.82C969.036 68.3714 929.684 16 875.078 16H123.621Z';
-  const HIGHLIGHT_PATH = 'M312.638 16C258.249 16 218.93 67.9829 233.733 120.318L311.8 396.318C312.218 397.796 312.675 399.255 313.17 400.693C246.82 459.501 205 545.367 205 640.75V3187C205 3319.96 348.717 3427.75 526 3427.75H336.983C159.7 3427.75 15.9837 3319.96 15.9834 3187V640.75C15.9834 545.367 57.8032 459.501 124.153 400.693C123.659 399.255 123.201 397.796 122.783 396.318L44.7168 120.318C29.9137 67.9829 69.2324 16 123.621 16H312.638Z';
-  // Внутри маски — область жидкости. После сжатия корпуса:
-  // LIQ_TOP=590 (внутри плечиков, маска подрежет), LIQ_BOTTOM=3427.75.
-  const LIQ_TOP = 590;
-  const LIQ_BOTTOM = 3427.75;
+  // Обновлённый Figma-SVG, корпус сжат на 25%: y ≥ 679 → 679 + (y-679)*0.75.
+  // ViewBox по высоте 4420 → 3484.75. Горлышко и плечики (y < 679) не тронуты.
+  const SVG_VIEW = '0 0 1051 3484.75';
+  const MASK_PATH = 'M858.68 45C913.641 45.0003 953.042 98.0094 937.198 150.638L849.273 442.703C921.875 496.031 969 582.012 969 679V3095.125C969 3281.3125 767.752 3432.25 519.5 3432.25C271.248 3432.25 70 3281.3125 70 3095.125V679C70 584.041 115.174 499.632 185.203 446.092C184.84 445.007 184.498 443.911 184.178 442.805L99.3447 149.805C84.1602 97.3593 123.51 45 178.109 45H858.68Z';
+  const OUTLINE_PATH = 'M913.334 0C982.885 0 1033.59 65.8517 1015.81 133.093L937.917 427.731C1002.02 488.591 1042 574.627 1042 670V3109.75C1042 3316.855 818.142 3484.75 542 3484.75H466C208.635 3484.75 9.08903e-06 3328.27 0 3135.25V670C1.49627e-05 576.102 38.7481 491.254 101.126 430.573L24.1943 132.489C6.87802 65.3946 57.5379 0 126.831 0H913.334ZM144.621 45C90.2324 45 50.9137 96.9829 65.7168 149.318L143.783 425.318C144.201 426.796 144.659 428.255 145.153 429.693C78.8031 488.501 36.9834 574.367 36.9834 670V3114.25C36.9834 3304.7875 242.932 3459.25 496.983 3459.25H520.983C788.289 3459.25 1004.98 3296.7325 1004.98 3096.25V670C1004.98 573.19 962.127 486.39 894.352 427.536C894.53 426.967 894.704 426.395 894.87 425.82L974.839 149.82C990.036 97.3714 950.684 45 896.078 45H144.621Z';
+  const HIGHLIGHT_PATH = 'M333.638 45C279.249 45 239.93 96.9829 254.733 149.318L332.8 425.318C333.218 426.796 333.675 428.255 334.17 429.693C267.82 488.501 226 574.367 226 670V3096.25C226 3252.27 393.43 3408.78 615.491 3441.585C584.926 3447.115 553.325 3459.25 520.983 3459.25C253.678 3459.25 36.9834 3296.7325 36.9834 3096.25V670C36.9834 574.367 78.8031 488.501 145.153 429.693C144.659 428.255 144.201 426.796 143.783 425.318L65.7168 149.318C50.9137 96.9829 90.2324 45 144.621 45H333.638Z';
+  // Область жидкости в новом SVG: rect'ы Figma шли от y=619 до y=4350.
+  // После сжатия LIQ_BOTTOM = 3432.25. LIQ_TOP=619 (внутри плечиков).
+  const LIQ_TOP = 619;
+  const LIQ_BOTTOM = 3432.25;
   const LIQ_RANGE = LIQ_BOTTOM - LIQ_TOP;
-  // Пробка — рисуется на месте горлышка и верха плечиков.
-  const CORK_TOP = 16, CORK_BOTTOM = LIQ_TOP;
-  // Перекрытие слоёв (overlap), чтобы между ними не было видимой
-  // тонкой полоски фона из-за sub-pixel rendering.
-  const LAYER_OVERLAP = 20;
+  // Перекрытие слоёв — устранят тонкие фоновые полоски между ними.
+  const LAYER_OVERLAP = 24;
 
   function buildBottle(stack, idx, capacity) {
     const s = State.get();
@@ -1554,36 +1545,22 @@ window.Render = (() => {
       return `<rect class="layer${isNew ? ' is-new' : ''}" x="-1214" y="${y.toFixed(2)}" width="3428" height="${h.toFixed(2)}" fill="${hex}"/>`;
     }).join('');
 
-    // Пробка (только для completed)
-    const corkRect = completed
-      ? `<rect class="cork" x="-1214" y="${CORK_TOP}" width="3428" height="${CORK_BOTTOM - CORK_TOP}" fill="url(#corkGrad${idx})"/>`
-      : '';
-    const corkDefs = completed
-      ? `<linearGradient id="corkGrad${idx}" x1="0" y1="0" x2="0" y2="1">
-           <stop offset="0"   stop-color="#e3b97e"/>
-           <stop offset="0.55" stop-color="#c08d4b"/>
-           <stop offset="1"   stop-color="#8a5a26"/>
-         </linearGradient>`
-      : '';
-
     el.innerHTML = `
       <svg viewBox="${SVG_VIEW}" preserveAspectRatio="xMidYMid meet" xmlns="${SVG_NS}">
         <defs>
-          <mask id="bottleMask${idx}" maskUnits="userSpaceOnUse" x="15" y="16" width="969" height="4341">
+          <mask id="bottleMask${idx}" maskUnits="userSpaceOnUse">
             <path d="${MASK_PATH}" fill="white"/>
           </mask>
-          ${corkDefs}
         </defs>
         <g mask="url(#bottleMask${idx})">
           ${layerRects}
-          ${corkRect}
         </g>
         <!-- Обводка (use currentColor → меняется через CSS .selected/.completed) -->
         <path d="${OUTLINE_PATH}" fill="currentColor" fill-rule="evenodd"/>
         <!-- Левый внутренний блик -->
-        <path d="${HIGHLIGHT_PATH}" fill="white" fill-opacity="0.13"/>
+        <path d="${HIGHLIGHT_PATH}" fill="white" fill-opacity="0.17"/>
         <!-- Наклонная «таблетка» блика на горлышке -->
-        <rect x="76" y="86.2461" width="58.4172" height="280" rx="29.2086" transform="rotate(-15.1276 76 86.2461)" fill="#D9D9D9"/>
+        <rect x="102" y="101.098" width="77.0141" height="333.084" rx="38.5071" transform="rotate(-15.1276 102 101.098)" fill="white"/>
       </svg>
     `;
     return el;
@@ -1605,7 +1582,7 @@ window.Render = (() => {
           </linearGradient>
         </defs>
         <path d="${OUTLINE_PATH}" fill="currentColor" fill-rule="evenodd"/>
-        <g transform="translate(499.5 1750)">
+        <g transform="translate(525.5 1742)">
           <circle r="260" fill="url(#plusBg)">
             <animate attributeName="r" values="260;300;260" dur="1.6s" repeatCount="indefinite"/>
           </circle>
@@ -1625,8 +1602,6 @@ window.Render = (() => {
       const d = getDifficulty(s.sticks.length, s.capacity);
       $hudDiff.textContent = d.name;
       $hudDiff.style.setProperty('--diff-color', d.color);
-      // text-stroke не наследует currentColor: задаём явно через стиль.
-      $hudDiff.style.webkitTextStrokeColor = d.color;
     }
   }
 
@@ -1672,45 +1647,63 @@ window.Render = (() => {
    */
   function animatePour(srcIdx, dstIdx, color) {
     return new Promise(resolve => {
-      const src = $sticks.children[srcIdx];
-      const dst = $sticks.children[dstIdx];
+      let src = $sticks.children[srcIdx];
+      let dst = $sticks.children[dstIdx];
       if (!src || !dst) { resolve(); return; }
 
       const srcRect = src.getBoundingClientRect();
       const dstRect = dst.getBoundingClientRect();
-      // Координаты горлышек в viewport-пикселях. Горлышко SVG занимает
-      // ~13% высоты колбы сверху (приближённо).
       const srcNeckX = srcRect.left + srcRect.width / 2;
       const srcNeckY = srcRect.top + srcRect.height * 0.04;
       const dstNeckX = dstRect.left + dstRect.width / 2;
       const dstNeckY = dstRect.top + dstRect.height * 0.04;
 
-      // Translate: горлышко источника становится на ~20px выше горлышка приёмника
       const flyDx = dstNeckX - srcNeckX;
       const flyDy = (dstNeckY - srcNeckY) - 22;
-      // Угол: + (clockwise) если приёмник правее источника, иначе -.
       const tiltDir = (dstNeckX >= srcNeckX) ? 70 : -70;
 
       src.classList.add('pouring');
-      // Pivot — горлышко (середина по X, верх по Y) самой колбы.
       src.style.transformOrigin = '50% 4%';
-
-      // Шаг 1: подлёт горлышка к горлышку
+      // Шаг 1: подлёт
       src.style.transition = 'transform .32s cubic-bezier(.3,0,.25,1)';
       src.style.transform  = `translate(${flyDx}px, ${flyDy}px)`;
 
-      // Шаг 2: наклон — горлышко остаётся на месте, тело уходит в сторону
       setTimeout(() => {
+        // Шаг 2: наклон (горлышко на месте, тело отлетает)
         src.style.transition = 'transform .22s cubic-bezier(.4,0,.3,1)';
         src.style.transform  = `translate(${flyDx}px, ${flyDy}px) rotate(${tiltDir}deg)`;
 
-        // Шаг 3: струйка через ~120мс наклона
         setTimeout(() => {
-          dst.classList.add('receiving-bump');
+          // Шаг 3: момент «лить» — теперь пересобираем source и dst DOM
+          // под post-move состояние. До этого момента src показывал
+          // pre-move (со всеми слоями) — это и устраняет «слой исчезает
+          // в начале анимации» баг. Source перерисовываем с сохранением
+          // текущего transform/origin/transition, чтобы анимация
+          // не сбросилась.
+          const s = State.get();
+          const keepTransform   = src.style.transform;
+          const keepTransition  = src.style.transition;
+          const keepOrigin      = src.style.transformOrigin;
+          const newSrc = buildBottle(s.sticks[srcIdx], srcIdx, s.capacity);
+          newSrc.classList.add('pouring');
+          newSrc.style.transform       = keepTransform;
+          newSrc.style.transition      = keepTransition;
+          newSrc.style.transformOrigin = keepOrigin;
+          src.replaceWith(newSrc);
+          src = newSrc;
+
+          const newDst = buildBottle(s.sticks[dstIdx], dstIdx, s.capacity);
+          newDst.classList.add('receiving-bump');
+          dst.replaceWith(newDst);
+          dst = newDst;
+          // lastAdded потребляется уже текущим buildBottle (он навесил .is-new
+          // на свежие слои dst) — очищаем для следующих ходов.
+          if (s.lastAdded) s.lastAdded = null;
+
+          // Струйка
           const stream = document.createElement('div');
           stream.className = 'pour-stream';
           stream.style.setProperty('--stream-color', `var(--c-${color}, var(--accent))`);
-          // Тонкая вертикальная струйка от горлышка приёмника вниз
           const liveDst = dst.getBoundingClientRect();
           const xStream = liveDst.left + liveDst.width / 2 - 3;
           const yTop = liveDst.top - 26;
@@ -1721,7 +1714,7 @@ window.Render = (() => {
           stream.style.width  = '6px';
           document.body.appendChild(stream);
 
-          // Шаг 4: возврат (сначала угол → 0, потом translate → 0)
+          // Шаг 4: возврат
           setTimeout(() => {
             src.style.transition = 'transform .18s ease';
             src.style.transform  = `translate(${flyDx}px, ${flyDy}px)`;
@@ -2478,15 +2471,20 @@ window.App = (() => {
       : null;
     const result = State.clickStick(idx);
     if (result === 'invalid') return;
-    Render.renderAll();
     if (window.Tutorial) Tutorial.notifyPlayerActed();
     if (result === 'moved' && prevSelected !== null && prevTopColor) {
+      // Не рендерим сразу — оставляем pre-move DOM (источник со всеми
+      // слоями). animatePour сам перерисует src/dst колбы на post-move
+      // состояние в нужный момент (когда из горлышка начинает литься).
       transferLocked = true;
       try { await Render.animatePour(prevSelected, idx, prevTopColor); }
       finally { transferLocked = false; }
+      Render.renderAll(); // финальный полный rerender — подстраховка
       if (State.isWon()) onWin();
       return;
     }
+    Render.renderAll(); // selected/deselected
+    return;
     if (result === 'moved' && State.isWon()) onWin();
   }
 
