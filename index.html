@@ -44,8 +44,18 @@
 html,body{height:100%;overflow:hidden;background:var(--bg-1);font-family:'Russo One','Segoe UI',system-ui,sans-serif;color:var(--text);user-select:none;-webkit-user-select:none;touch-action:manipulation}
 body{
   background:
+    /* Полупрозрачный паттерн «капли/пузырьки» — еле заметные кружки */
+    radial-gradient(circle at 14% 18%, rgba(255,255,255,.045) 1.6px, transparent 2.2px),
+    radial-gradient(circle at 78% 32%, rgba(255,255,255,.04) 1.2px, transparent 2px),
+    radial-gradient(circle at 42% 64%, rgba(255,255,255,.05) 2px, transparent 2.8px),
+    radial-gradient(circle at 88% 86%, rgba(255,255,255,.04) 1.4px, transparent 2.4px),
+    /* Тонкая косая сетка-«линии стекла» */
+    repeating-linear-gradient(115deg, rgba(255,255,255,.018) 0 1px, transparent 1px 32px),
+    repeating-linear-gradient(65deg, rgba(255,255,255,.018) 0 1px, transparent 1px 28px),
+    /* Базовый фиолетовый градиент */
     radial-gradient(ellipse at top, var(--bg-3) 0%, var(--bg-2) 35%, var(--bg-1) 75%),
     var(--bg-1);
+  background-size: 240px 240px, 320px 320px, 380px 380px, 280px 280px, auto, auto, auto, auto;
   background-attachment:fixed;
 }
 
@@ -92,6 +102,32 @@ body{
 .btn-dev:hover{color:var(--text);background:rgba(255,255,255,.06);border-color:rgba(255,255,255,.3)}
 .btn-dev:active{transform:translateY(1px)}
 
+/* ===== LEVEL TITLE (большие буквы по середине + сложность) ===== */
+.level-title{
+  flex:0 0 auto;
+  display:flex;flex-direction:column;align-items:center;
+  padding:6px 16px 4px;
+  text-align:center;
+}
+.level-title .lt-name{
+  font-size:clamp(28px, 7vw, 44px);
+  font-weight:400;
+  letter-spacing:1.4px;
+  color:var(--text);
+  text-transform:uppercase;
+  text-shadow:0 4px 16px rgba(0,0,0,.45), 0 0 24px rgba(255,216,107,.18);
+  line-height:1;
+}
+.level-title .lt-name b{color:var(--accent);font-weight:400}
+.level-title .lt-diff{
+  margin-top:4px;
+  font-size:13px;
+  color:var(--text-dim);
+  display:inline-flex;align-items:center;gap:6px;
+  letter-spacing:.5px;
+}
+.level-title .lt-diff .stars{color:var(--accent);letter-spacing:1px}
+
 /* ===== PLAYFIELD ===== */
 .field{
   flex:1 1 auto;
@@ -136,28 +172,30 @@ body{
 .bottle{
   position:relative;
   width:100%;
-  max-width:68px;
-  aspect-ratio:1 / 2.8;
+  max-width:70px;
+  aspect-ratio:1 / 2.7;
   cursor:pointer;
-  margin-top:18px;                       /* место для торчащего вверх горлышка */
+  margin-top:22px;                       /* место для торчащего вверх горлышка */
   background:linear-gradient(180deg, rgba(255,255,255,.10), rgba(255,255,255,.04));
   border:2px solid rgba(255,255,255,.45);
-  border-radius:14px 14px 32px 32px / 14px 14px 42px 42px;
+  /* Сверху небольшое скругление под горлышко, плечики ярко выражены;
+     снизу — глубокое округление, как у пробирки. */
+  border-radius:10px 10px 40px 40px / 10px 10px 56px 56px;
   transition:transform .22s cubic-bezier(.4,0,.25,1);
   box-shadow:
-    inset 6px 0 6px -4px rgba(255,255,255,.5),
-    inset -5px 0 5px -3px rgba(0,0,0,.3),
-    inset 0 -8px 14px -6px rgba(0,0,0,.35),
+    inset 7px 0 8px -5px rgba(255,255,255,.55),
+    inset -6px 0 7px -4px rgba(0,0,0,.32),
+    inset 0 -10px 18px -8px rgba(0,0,0,.38),
     0 6px 14px rgba(0,0,0,.35);
 }
-/* Горлышко колбы — тонкое стекло, торчит вверх над корпусом */
+/* Горлышко колбы — узкое стеклянное горло, торчит вверх над корпусом */
 .bottle::before{
-  content:'';position:absolute;left:50%;top:-18px;transform:translateX(-50%);
-  width:60%;height:22px;
-  background:linear-gradient(180deg, rgba(255,255,255,.18), rgba(255,255,255,.05));
+  content:'';position:absolute;left:50%;top:-20px;transform:translateX(-50%);
+  width:45%;height:24px;
+  background:linear-gradient(180deg, rgba(255,255,255,.20), rgba(255,255,255,.06));
   border:2px solid rgba(255,255,255,.45);
   border-bottom:none;
-  border-radius:6px 6px 0 0;
+  border-radius:7px 7px 2px 2px;
   box-shadow:
     inset 3px 0 3px -2px rgba(255,255,255,.5),
     inset -3px 0 3px -2px rgba(0,0,0,.2);
@@ -222,6 +260,117 @@ body{
 .bottle .layer.c-purple {background:var(--c-purple)}
 .bottle .layer.c-crimson{background:var(--c-crimson)}
 .bottle .layer.c-cyan   {background:var(--c-cyan)}
+
+/* ===== ПРОБКА для собранной (completed) колбы =====
+   Замещает прозрачное горлышко на «деревянную пробку». */
+.bottle.completed::before{
+  background:linear-gradient(180deg,#e3b97e 0%,#c08d4b 55%,#8a5a26 100%);
+  border-color:#5a3812;
+  box-shadow:
+    inset 3px 0 3px -1px rgba(255,230,180,.5),
+    inset -3px 0 3px -1px rgba(0,0,0,.35),
+    0 -2px 4px rgba(0,0,0,.3);
+  top:-14px;height:18px;
+  border-radius:5px 5px 2px 2px;
+}
+.bottle.completed::after{opacity:.25} /* блик слабее на «деревянной» крышке */
+
+/* ===== «+» bottle — полупрозрачная колба для активации бонуса ===== */
+.bottle.bottle-add{
+  background:rgba(255,255,255,.04);
+  border-style:dashed;
+  border-color:rgba(255,216,107,.55);
+  position:relative;
+}
+.bottle.bottle-add::before{
+  /* у бонусной колбы тоже есть горлышко, но мягче */
+  background:rgba(255,255,255,.06);
+  border-color:rgba(255,216,107,.45);
+  border-style:dashed;
+}
+.bottle.bottle-add::after{display:none} /* без блика */
+.bottle.bottle-add .add-plus{
+  position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+  width:36px;height:36px;border-radius:50%;
+  background:linear-gradient(180deg,#ffd23f,#ff8a2b);
+  color:#3b1300;
+  display:flex;align-items:center;justify-content:center;
+  font-size:26px;font-weight:700;line-height:1;
+  box-shadow:0 6px 12px rgba(255,138,43,.45), inset 0 -3px 6px rgba(0,0,0,.18);
+  z-index:5;
+  animation:bonusPulse 1.6s ease-in-out infinite;
+}
+.bottle.bottle-add:hover{border-color:var(--accent);background:rgba(255,216,107,.08)}
+@keyframes bonusPulse{
+  0%,100%{transform:translate(-50%,-50%) scale(1)}
+  50%{transform:translate(-50%,-50%) scale(1.12)}
+}
+
+/* ===== Анимация переливания =====
+   Источник «наклоняется» к приёмнику когда переливает. */
+.bottle.pouring-left{
+  animation:pourLeft .35s cubic-bezier(.4,0,.25,1);
+  transform-origin:50% 100%;
+  z-index:6;
+}
+.bottle.pouring-right{
+  animation:pourRight .35s cubic-bezier(.4,0,.25,1);
+  transform-origin:50% 100%;
+  z-index:6;
+}
+@keyframes pourLeft{
+  0%{transform:translateY(-16px) rotate(0)}
+  40%{transform:translateY(-22px) rotate(-14deg)}
+  100%{transform:translateY(-16px) rotate(0)}
+}
+@keyframes pourRight{
+  0%{transform:translateY(-16px) rotate(0)}
+  40%{transform:translateY(-22px) rotate(14deg)}
+  100%{transform:translateY(-16px) rotate(0)}
+}
+.bottle.receiving-bump{animation:receiveBump .25s ease}
+@keyframes receiveBump{
+  0%{transform:translateY(0)}
+  50%{transform:translateY(-6px)}
+  100%{transform:translateY(0)}
+}
+/* Струйка жидкости при переливании (создаётся JS-ом). */
+.pour-stream{
+  position:fixed;
+  width:6px;
+  background:var(--stream-color, var(--accent));
+  border-radius:3px;
+  pointer-events:none;
+  z-index:10;
+  box-shadow:0 0 8px var(--stream-color, var(--accent));
+  opacity:.9;
+  animation:streamFade .35s ease forwards;
+}
+@keyframes streamFade{
+  0%{opacity:0;transform:scaleY(0)}
+  30%{opacity:.95;transform:scaleY(1)}
+  100%{opacity:0;transform:scaleY(.6)}
+}
+
+/* ===== ТУТОРИАЛЬНАЯ РУКА ===== */
+.tutorial-hand{
+  position:fixed;
+  width:48px;height:48px;
+  pointer-events:none;
+  z-index:30;
+  font-size:42px;
+  filter:drop-shadow(0 4px 8px rgba(0,0,0,.5));
+  transform-origin:30% 30%;
+  transition:left .4s ease, top .4s ease, opacity .25s;
+  opacity:0;
+}
+.tutorial-hand.show{opacity:1}
+.tutorial-hand.tapping{animation:handTap 1.2s ease-in-out infinite}
+@keyframes handTap{
+  0%,100%{transform:scale(1) translateY(0)}
+  35%{transform:scale(.78) translateY(6px)}
+  60%{transform:scale(1.05) translateY(-2px)}
+}
 .bottle .layer.c-mint   {background:var(--c-mint)}
 .bottle .layer.c-coral  {background:var(--c-coral)}
 .bottle .layer.is-new{animation:layerDrop .35s cubic-bezier(.4,0,.25,1)}
@@ -392,11 +541,13 @@ body{
 <body>
 <div id="app">
   <div class="header">
-    <div class="level-badge">Уровень <b id="hud-level">1</b></div>
-    <div style="display:flex;gap:8px;align-items:center">
-      <div class="moves-pill">Ходов: <b id="hud-moves">0</b></div>
-      <button class="btn-dev" id="btn-dev" aria-label="Дев-панель" title="Дев-панель (Ctrl+Shift+D)">⚙</button>
-    </div>
+    <div class="moves-pill">Ходов: <b id="hud-moves">0</b></div>
+    <button class="btn-dev" id="btn-dev" aria-label="Дев-панель" title="Дев-панель (Ctrl+Shift+D)">⚙</button>
+  </div>
+
+  <div class="level-title">
+    <div class="lt-name">Уровень <b id="hud-level">1</b></div>
+    <div class="lt-diff" id="hud-diff"><span class="stars">★☆☆☆☆</span><span>очень просто</span></div>
   </div>
 
   <div class="field">
@@ -408,16 +559,15 @@ body{
       <span class="ico">↶</span>
       <span>Назад</span>
     </button>
-    <button class="btn btn-bonus" id="btn-bonus" aria-label="+ Колба" title="+ Колба за рекламу">
-      <span class="ico">＋</span>
-      <span>Колба<small>за рекламу</small></span>
-    </button>
     <button class="btn" id="btn-restart" aria-label="Заново" title="Заново">
       <span class="ico">↻</span>
       <span>Заново</span>
     </button>
   </div>
 </div>
+
+<!-- Туториальная рука для первого хода на L1 -->
+<div class="tutorial-hand" id="tutorial-hand" aria-hidden="true">👆</div>
 
 <div class="modal-wrap" id="win-modal">
   <div class="modal">
@@ -1321,9 +1471,9 @@ window.Persist = (() => {
    Контракт нативного wrapper'а описан в docs/ADS.md.
    ============================================================ */
 window.Ads = (() => {
-  // Ad-unit IDs. Замени на свои в Yandex Partner перед сборкой релизного APK.
-  const UNIT_INTERSTITIAL = 'R-M-DEMO-1';
-  const UNIT_REWARDED     = 'R-M-DEMO-2';
+  // Ad-unit IDs из Yandex Mobile Ads (partner.yandex.ru/mobile-ads).
+  const UNIT_INTERSTITIAL = 'R-M-19273571-2';
+  const UNIT_REWARDED     = 'R-M-19273571-1';
 
   let backend = 'mock';
   let ysdk = null;
@@ -1423,18 +1573,35 @@ window.Render = (() => {
   const $sticks = document.getElementById('sticks');
   const $hudLevel = document.getElementById('hud-level');
   const $hudMoves = document.getElementById('hud-moves');
+  const $hudDiff  = document.getElementById('hud-diff');
   const $winModal = document.getElementById('win-modal');
   const $winText  = document.getElementById('win-text');
   const $toast    = document.getElementById('toast');
-  const $bonus    = document.getElementById('btn-bonus');
   const $undo     = document.getElementById('btn-undo');
+
+  // Сложность от размера поля. 5 ступеней по sticks×capacity.
+  const DIFF_TIERS = [
+    { max:  9, stars:'★☆☆☆☆', name:'очень просто' },
+    { max: 15, stars:'★★☆☆☆', name:'просто' },
+    { max: 22, stars:'★★★☆☆', name:'средне' },
+    { max: 35, stars:'★★★★☆', name:'сложно' },
+    { max: Infinity, stars:'★★★★★', name:'очень сложно' },
+  ];
+  function getDifficulty(sticks, capacity) {
+    const score = sticks * capacity;
+    return DIFF_TIERS.find(t => score <= t.max);
+  }
 
   function renderAll() {
     const s = State.get();
     if (!s) return;
-    $sticks.dataset.count = String(s.sticks.length);
+    // К полю добавляем виртуальную «+» колбу, если бонус ещё не активирован.
+    const showAdd = !s.bonusUsedThisLevel && s.sticks.length < 13;
+    const totalCount = s.sticks.length + (showAdd ? 1 : 0);
+    $sticks.dataset.count = String(totalCount);
     $sticks.innerHTML = '';
     s.sticks.forEach((stack, idx) => $sticks.appendChild(buildBottle(stack, idx, s.capacity)));
+    if (showAdd) $sticks.appendChild(buildAddBottle(s.capacity));
     renderHud();
     renderActionButtons();
   }
@@ -1446,8 +1613,6 @@ window.Render = (() => {
     el.style.setProperty('--cap', capacity);
     if (State.get().selected === idx) el.classList.add('selected');
     if (State.isCompletedStack(stack, capacity)) el.classList.add('completed');
-    // Слои живут в отдельном контейнере .layers, прижатом к низу корпуса
-    // (sначала пустое стекло сверху, ниже — закрашенные слои)
     const layers = document.createElement('div');
     layers.className = 'layers';
     for (const color of stack) {
@@ -1459,20 +1624,70 @@ window.Render = (() => {
     return el;
   }
 
+  // Полупрозрачная «+» колба для активации бонуса за рекламу.
+  function buildAddBottle(capacity) {
+    const el = document.createElement('div');
+    el.className = 'bottle bottle-add';
+    el.dataset.role = 'add';
+    el.style.setProperty('--cap', capacity);
+    el.title = '+ Колба за рекламу';
+    const plus = document.createElement('div');
+    plus.className = 'add-plus';
+    plus.textContent = '+';
+    el.appendChild(plus);
+    return el;
+  }
+
   function renderHud() {
     const s = State.get();
     if (!s) return;
     $hudLevel.textContent = s.level;
     $hudMoves.textContent = s.moves;
+    if ($hudDiff) {
+      const d = getDifficulty(s.sticks.length, s.capacity);
+      $hudDiff.innerHTML = `<span class="stars">${d.stars}</span><span>${d.name}</span>`;
+    }
   }
 
   function renderActionButtons() {
     const s = State.get();
     if (!s) return;
     $undo.disabled = s.history.length === 0;
-    // Бонусную колбу скрываем, если уже использовали в этом уровне
-    // или колб уже > 12.
-    $bonus.style.display = (s.bonusUsedThisLevel || s.sticks.length >= 13) ? 'none' : '';
+  }
+
+  /**
+   * Анимация переливания между двумя колбами. Источник наклоняется в
+   * сторону приёмника, приёмник немного подпрыгивает, между горлышками
+   * рисуется тонкая струйка цвета жидкости. Затем renderAll() обновит
+   * раскладку (state уже изменён до вызова).
+   */
+  function animatePour(srcIdx, dstIdx, color) {
+    const src = $sticks.children[srcIdx];
+    const dst = $sticks.children[dstIdx];
+    if (!src || !dst) return;
+    const srcRect = src.getBoundingClientRect();
+    const dstRect = dst.getBoundingClientRect();
+    const srcCx = srcRect.left + srcRect.width / 2;
+    const dstCx = dstRect.left + dstRect.width / 2;
+    const direction = dstCx > srcCx ? 'right' : 'left';
+    src.classList.add(direction === 'right' ? 'pouring-right' : 'pouring-left');
+    dst.classList.add('receiving-bump');
+    // Струйка между горлышками
+    const stream = document.createElement('div');
+    stream.className = 'pour-stream';
+    stream.style.setProperty('--stream-color', `var(--c-${color}, var(--accent))`);
+    const x = (srcCx + dstCx) / 2;
+    const yTop = Math.min(srcRect.top, dstRect.top) - 18;
+    const yBot = Math.min(srcRect.top, dstRect.top) + 20;
+    stream.style.left = (x - 3) + 'px';
+    stream.style.top  = yTop + 'px';
+    stream.style.height = (yBot - yTop) + 'px';
+    document.body.appendChild(stream);
+    setTimeout(() => {
+      src.classList.remove('pouring-right', 'pouring-left');
+      dst.classList.remove('receiving-bump');
+      stream.remove();
+    }, 360);
   }
 
   function showWin(text) {
@@ -1489,7 +1704,8 @@ window.Render = (() => {
     toastTimer = setTimeout(() => $toast.classList.remove('show'), ms);
   }
 
-  return { renderAll, renderHud, renderActionButtons, showWin, hideWin, toast };
+  return { renderAll, renderHud, renderActionButtons, showWin, hideWin, toast,
+           animatePour, getDifficulty };
 })();
 
 /* ============================================================
@@ -2067,6 +2283,75 @@ window.DevPanel = (() => {
 
 
 /* ============================================================
+   [TUTORIAL] — анимированная рука 👆 для первого хода на L1.
+   Показывается только если игрок ещё ни разу не сделал ход
+   (Persist.totalCompleted === 0 && stats.totalMoves === 0).
+   Использует Solver.findShortestPath чтобы взять оптимальный
+   первый ход и тыкает на колбу-источник → паузу → колбу-приёмник.
+   После любого клика по полю — рука прячется навсегда.
+   ============================================================ */
+window.Tutorial = (() => {
+  const $hand = document.getElementById('tutorial-hand');
+  let active = false;
+  let cancelTimer = null;
+  let cycleTimer = null;
+
+  function maybeStart(levelNum) {
+    cleanup();
+    if (levelNum !== 1) return;
+    const persisted = Persist.load();
+    // Активируем только если игрок свежий: 0 пройденных + 0 ходов.
+    if ((persisted.totalCompleted || 0) > 0) return;
+    if ((persisted.stats?.totalMoves || 0) > 0) return;
+    const s = State.get();
+    if (!s) return;
+    // Берём оптимальный первый ход BFS-решателем.
+    const sol = Solver.findShortestPath(s.sticks, s.capacity, 1500, { multiTransfer: true });
+    if (!sol.firstMove) return;
+    const { from, to } = sol.firstMove;
+    active = true;
+    cycleOnce(from, to);
+  }
+
+  function cycleOnce(from, to) {
+    if (!active) return;
+    const sticksEl = document.getElementById('sticks');
+    if (!sticksEl) return;
+    const src = sticksEl.children[from];
+    const dst = sticksEl.children[to];
+    if (!src || !dst) { stop(); return; }
+    moveHandTo(src);
+    cancelTimer = setTimeout(() => {
+      if (!active) return;
+      moveHandTo(dst);
+      cycleTimer = setTimeout(() => cycleOnce(from, to), 1300);
+    }, 1300);
+  }
+
+  function moveHandTo(bottleEl) {
+    const r = bottleEl.getBoundingClientRect();
+    // Рука появляется чуть правее-ниже горлышка колбы (имитация тапа).
+    $hand.style.left = (r.right - 14) + 'px';
+    $hand.style.top  = (r.top + r.height * 0.4) + 'px';
+    $hand.classList.add('show', 'tapping');
+  }
+
+  function stop() {
+    active = false;
+    $hand.classList.remove('show', 'tapping');
+    cleanup();
+  }
+  function cleanup() {
+    if (cancelTimer) { clearTimeout(cancelTimer); cancelTimer = null; }
+    if (cycleTimer)  { clearTimeout(cycleTimer);  cycleTimer  = null; }
+  }
+
+  function notifyPlayerActed() { if (active) stop(); }
+
+  return { maybeStart, notifyPlayerActed, stop };
+})();
+
+/* ============================================================
    [APP] — bootstrap, обработчики кликов, win flow.
    ============================================================ */
 window.App = (() => {
@@ -2096,6 +2381,8 @@ window.App = (() => {
       session = { levelNum, params };
       Render.renderAll();
       Render.hideWin();
+      // Туториал — только на L1, и только если игрок ещё не прошёл ни одного уровня.
+      if (window.Tutorial) Tutorial.maybeStart(levelNum);
     }, 30);
   }
 
@@ -2103,6 +2390,8 @@ window.App = (() => {
     document.getElementById('sticks').addEventListener('click', (e) => {
       const bottle = e.target.closest('.bottle');
       if (!bottle) return;
+      // Клик по «+» колбе — активируем бонус через rewarded ad.
+      if (bottle.dataset.role === 'add') { onBonus(); return; }
       const idx = +bottle.dataset.idx;
       if (Number.isNaN(idx)) return;
       onStickClick(idx);
@@ -2111,15 +2400,27 @@ window.App = (() => {
     document.getElementById('btn-undo').addEventListener('click', onUndo);
     document.getElementById('btn-restart').addEventListener('click', onRestart);
     document.getElementById('btn-next').addEventListener('click', onNext);
-    document.getElementById('btn-bonus').addEventListener('click', onBonus);
     document.getElementById('btn-dev').addEventListener('click', () => DevPanel.toggle());
   }
 
   function onStickClick(idx) {
     if (transferLocked) return;
+    // Перед изменением state — снимок верхнего цвета и selected (для анимации).
+    const prev = State.get();
+    const prevSelected = prev ? prev.selected : null;
+    const prevTopColor = prev && prevSelected !== null && prev.sticks[prevSelected].length
+      ? prev.sticks[prevSelected][prev.sticks[prevSelected].length - 1]
+      : null;
     const result = State.clickStick(idx);
     if (result === 'invalid') return;
     Render.renderAll();
+    if (result === 'moved' && prevSelected !== null && prevTopColor) {
+      // Анимация после renderAll — иначе .pouring класс уничтожается
+      // пересозданием DOM в renderAll.
+      Render.animatePour(prevSelected, idx, prevTopColor);
+    }
+    // Туториал убираем после первого валидного клика игрока.
+    if (window.Tutorial) Tutorial.notifyPlayerActed();
     if (result === 'moved' && State.isWon()) onWin();
   }
 

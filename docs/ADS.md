@@ -15,13 +15,40 @@
 | **Interstitial** | Между уровнями, каждые 2 победы (см. `Persist.shouldShowInterstitial`) | `Ads.showInterstitial()` | `Ads.UNIT_INTERSTITIAL` |
 | **Rewarded** | По клику «+ Колба» в bottom bar | `Ads.showRewarded()` | `Ads.UNIT_REWARDED` |
 
-Demo-ID в коде: `R-M-DEMO-1` и `R-M-DEMO-2`. Перед релизом замени на свои из [Yandex Partner](https://partner.yandex.ru/).
+Unit-ID в коде:
+- Interstitial: `R-M-19273571-2`
+- Rewarded: `R-M-19273571-1`
+
+Источник: [Yandex Partner Mobile Ads](https://partner.yandex.ru/mobile-ads).
 
 ## Native backend (Yandex Mobile Ads SDK через WebView)
 
 Это **целевой production-режим**. Игра запакована в Android APK через `html2apk`, который оборачивает WebView. Реклама — нативный Yandex Mobile Ads SDK (`com.yandex.android:mobileads`), вызывается из JS через `WebView.addJavascriptInterface`.
 
-### Что должна сделать APK-обёртка (Android)
+### Автоматическая сборка через html2apk
+
+Начиная с версии `html2apk` с поддержкой Yandex Mobile Ads, шаги 1–4 ниже выполняются **автоматически** при флаге `-YandexAdsBridge`:
+
+```
+& "$env:LOCALAPPDATA\Programs\html2apk\html2apk.ps1" `
+  -ProjectFolder "C:\Users\Александр\Desktop\Claude\01_RS_GlitterSort" `
+  -AppName "GlitterSort" `
+  -AppId "com.matryoshka.glittersort" `
+  -OutputFile "$env:USERPROFILE\Downloads\GlitterSort.apk" `
+  -YandexAdsBridge
+```
+
+html2apk:
+- добавит `implementation 'com.yandex.android:mobileads:7.0.1'` в `android/app/build.gradle`;
+- добавит `ACCESS_NETWORK_STATE` в `AndroidManifest.xml`;
+- создаст `YandexAdsBridge.java` (тот же класс, что описан ниже);
+- перепишет `MainActivity.java` (добавит `MobileAds.initialize` + `addJavascriptInterface`).
+
+Все правки идемпотентны — повторная сборка их не дублирует. `YandexAdsBridge.java` перезаписывается каждый раз (источник правды — `html2apk.ps1`).
+
+### Что делает APK-обёртка (Android), вручную
+
+Если когда-нибудь придётся собирать без html2apk — вот ровно те шаги, которые он автоматизирует:
 
 1. **Подключить SDK** в `app/build.gradle`:
 
