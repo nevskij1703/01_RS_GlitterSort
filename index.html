@@ -1349,6 +1349,7 @@ window.Persist = (() => {
   }
 
   // Interstitial cadence: показывать каждые 2 пройденных уровня
+  // (LEGACY: новой логикой не используется, оставлен для совместимости)
   function bumpInterstitialCounter() {
     const data = load();
     data.interstitialCounter = (data.interstitialCounter || 0) + 1;
@@ -1357,6 +1358,25 @@ window.Persist = (() => {
   }
   function shouldShowInterstitial(counter) {
     return counter > 0 && counter % 2 === 0;
+  }
+
+  // Recovery flag для случая, когда мы открыли интерстишл, но игрок
+  // закрыл приложение до того как реклама зарезолвилась. На следующем
+  // запуске App.start читает этот timestamp и, если прошло меньше 5 минут,
+  // сразу показывает рекламу перед загрузкой уровня (см. требование 4 ТЗ).
+  function markInterstitialPending(ts) {
+    const data = load();
+    data.interstitialPendingAt = ts;
+    save(data);
+  }
+  function clearInterstitialPending() {
+    const data = load();
+    delete data.interstitialPendingAt;
+    save(data);
+  }
+  function loadInterstitialPending() {
+    const data = load();
+    return data.interstitialPendingAt || 0;
   }
 
   // Generator meta — отдельный ключ. Хранит "человеко-читаемое" резюме
@@ -1406,6 +1426,7 @@ window.Persist = (() => {
     loadCustomLevel, saveCustomLevel, clearCustomLevel, clearAll, clear,
     loadGenMeta, saveGenMeta, shiftGenMeta,
     bumpInterstitialCounter, shouldShowInterstitial,
+    markInterstitialPending, clearInterstitialPending, loadInterstitialPending,
   };
 })();
 
@@ -1464,6 +1485,20 @@ window.Ads = (() => {
     return Promise.resolve();
   }
 
+  /**
+   * Заранее прогревает кеш интерстишла. На native — native wrapper и так
+   * выполняет preload в onAdDismissed, но дополнительный вызов безопасен
+   * (повторный preload игнорируется или просто рефрешит кэш). На yagames
+   * и mock — no-op (yagames держит свой кэш, mock не нужен).
+   * Вызывается из App.onWin (когда показывается модал победы) — даём 1-2
+   * секунды на подгрузку перед тем как игрок нажмёт «Дальше».
+   */
+  function preloadInterstitial() {
+    if (backend === 'native' && window.YandexAds && typeof window.YandexAds.preloadInterstitial === 'function') {
+      try { window.YandexAds.preloadInterstitial(UNIT_INTERSTITIAL); } catch (e) {}
+    }
+  }
+
   function showInterstitial() {
     if (backend === 'native') {
       return new Promise(resolve => {
@@ -1515,7 +1550,7 @@ window.Ads = (() => {
 
   function getBackend() { return backend; }
 
-  return { init, showInterstitial, showRewarded, getBackend, UNIT_INTERSTITIAL, UNIT_REWARDED };
+  return { init, showInterstitial, preloadInterstitial, showRewarded, getBackend, UNIT_INTERSTITIAL, UNIT_REWARDED };
 })();
 
 /* ============================================================
@@ -2569,12 +2604,79 @@ window.App = (() => {
   let session = null;       // { levelNum, params }
   let transferLocked = false;
 
-  function start() {
+  // ===== Интерстишл политика =====
+  // 1) Показываем только после прохождения 5+ уровня
+  // 2) Только если игрок «дёргал» уровень (undo / restart / +колба)
+  // 3) Cooldown 2 мин между показами; cooldown сбрасывается при перезапуске
+  //    приложения (хранится в памяти, не в localStorage)
+  // 4) Если предыдущий показ не успел зарезолвиться (закрыл приложение),
+  //    и прошло < 5 мин — показываем сразу на старте.
+  const INTERSTITIAL_MIN_COMPLETED_LEVEL = 5;   // показ только после прохождения L≥5
+  const INTERSTITIAL_COOLDOWN_MS         = 2 * 60 * 1000;  // 2 минуты
+  const INTERSTITIAL_RECOVERY_MS         = 5 * 60 * 1000;  // 5 минут на восстановление
+  const INTERSTITIAL_SHOW_TIMEOUT_MS     = 90 * 1000;      // safety: не зависать дольше 90с
+  // In-memory cooldown — на сессию игры. Сбрасывается при перезапуске.
+  let lastInterstitialAtMs = 0;
+
+  function shouldShowInterstitialNow(justCompletedLevel, flagged) {
+    if (!flagged) return false;
+    if (justCompletedLevel < INTERSTITIAL_MIN_COMPLETED_LEVEL) return false;
+    if (Date.now() - lastInterstitialAtMs < INTERSTITIAL_COOLDOWN_MS) return false;
+    return true;
+  }
+
+  /**
+   * Показывает интерстишл и затем грузит nextLevel.
+   *   - Перед запуском помечает в Persist'е timestamp начала (для recovery).
+   *   - При успешном завершении (промис зарезолвился) выставляет cooldown.
+   *   - При закрытии приложения посреди рекламы — pendingAt остаётся в LS,
+   *     и при следующем запуске App.start этот же путь повторится (см. start).
+   *   - safety timeout: если backend завис и промис не резолвится >90с,
+   *     просто загружаем уровень без cooldown'а.
+   */
+  async function presentInterstitialThenLoad(nextLevel) {
+    Render.toast('Реклама...', 1200);
+    Persist.markInterstitialPending(Date.now());
+    let watched = false;
+    try {
+      const result = await Promise.race([
+        Ads.showInterstitial().then(() => 'done'),
+        new Promise(resolve => setTimeout(() => resolve('timeout'), INTERSTITIAL_SHOW_TIMEOUT_MS)),
+      ]);
+      watched = result === 'done';
+    } catch (e) {
+      console.warn('[Ads] interstitial show failed', e);
+    } finally {
+      Persist.clearInterstitialPending();
+      if (watched) lastInterstitialAtMs = Date.now();
+      loadLevel(nextLevel);
+    }
+  }
+
+  async function start() {
     const persisted = Persist.load();
-    Ads.init().finally(() => {
-      loadLevel(persisted.level || 1);
+    await Ads.init().catch(() => {});
+
+    // Recovery: если меньше 5 минут назад был неотданный интерстишл —
+    // показываем его сейчас и только потом грузим уровень.
+    const pendingAt = Persist.loadInterstitialPending();
+    if (pendingAt && Date.now() - pendingAt < INTERSTITIAL_RECOVERY_MS) {
+      console.log('[Ads] recovery: показываем недосмотренный интерстишл');
       wireEvents();
-    });
+      await presentInterstitialThenLoad(persisted.level || 1);
+      return;
+    }
+    if (pendingAt) Persist.clearInterstitialPending(); // истёкший флаг — чистим
+    loadLevel(persisted.level || 1);
+    wireEvents();
+  }
+
+  // Помечает текущий уровень как «дёрганый» — игрок использовал откат,
+  // рестарт или бонусную колбу. По окончании уровня (onNext) это станет
+  // одним из условий показа интерстишла.
+  function flagInterstitialTrigger() {
+    const s = State.get();
+    if (s) s.interstitialFlagged = true;
   }
 
   function loadLevel(levelNum) {
@@ -2685,11 +2787,13 @@ window.App = (() => {
     const persisted = Persist.load();
     persisted.stats.undoUsed = (persisted.stats.undoUsed || 0) + 1;
     Persist.save(persisted);
+    flagInterstitialTrigger();
     Render.renderAll();
   }
 
   function onRestart() {
     State.restart();
+    flagInterstitialTrigger();
     Render.renderAll();
     Render.toast('Уровень перезапущен');
   }
@@ -2704,6 +2808,11 @@ window.App = (() => {
     // показывала уже новый.
     persisted.level = (s ? s.level : 1) + 1;
     Persist.save(persisted);
+    // Прогреваем интерстишл на фоне, пока игрок читает модал — на native
+    // wrapper preload идёт в его SDK, у нас он no-op для других backend'ов.
+    if (window.Ads && Ads.preloadInterstitial) {
+      try { Ads.preloadInterstitial(); } catch (_e) {}
+    }
     Render.showWin(`Молодец! Готов к уровню ${persisted.level}?`);
   }
 
@@ -2712,12 +2821,13 @@ window.App = (() => {
     // Между уровнями дев-панель закрываем — она для редактирования
     // конкретного уровня и не должна болтаться через переход.
     if (window.DevPanel) DevPanel.close();
-    const counter = Persist.bumpInterstitialCounter();
+    const s = State.get();
+    const justCompletedLevel = s ? s.level : 0;
+    const flagged = !!(s && s.interstitialFlagged);
     const persisted = Persist.load();
     const nextLevel = persisted.level;
-    if (Persist.shouldShowInterstitial(counter)) {
-      Render.toast('Реклама...', 1200);
-      Ads.showInterstitial().finally(() => loadLevel(nextLevel));
+    if (shouldShowInterstitialNow(justCompletedLevel, flagged)) {
+      presentInterstitialThenLoad(nextLevel);
     } else {
       loadLevel(nextLevel);
     }
@@ -2734,6 +2844,7 @@ window.App = (() => {
         const persisted = Persist.load();
         persisted.stats.bonusUsed = (persisted.stats.bonusUsed || 0) + 1;
         Persist.save(persisted);
+        flagInterstitialTrigger();
         Render.renderAll();
         Render.toast('+1 колба (бонус)');
       }
