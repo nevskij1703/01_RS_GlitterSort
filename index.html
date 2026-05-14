@@ -164,19 +164,46 @@ body{
   color:var(--accent);
   filter:drop-shadow(0 10px 16px rgba(255,216,107,.35));
 }
-/* .completed теперь меняет только обводку в зелёный — пробку не рисуем. */
-.bottle.completed{
-  color:var(--ok);
-  filter:drop-shadow(0 0 12px rgba(123,227,123,.5)) drop-shadow(0 6px 12px rgba(0,0,0,.42));
+/* .completed не перекрашивает обводку — вместо подсветки в правом нижнем
+   углу появляется бейдж с галочкой (см. .check-badge ниже). Бутылка остаётся
+   в нейтральном белом контуре, индикатор «собрана» — отдельный элемент. */
+
+/* Бейдж «галочка» в правом нижнем углу собранной колбы. Размер чуть
+   меньше «+» на бонусной колбе (тот ~26px idle / ~30px peak pulse); метимся
+   в ~24px, но масштабируем относительно ширины колбы для мелких экранов. */
+.bottle .check-badge{
+  position:absolute;
+  right:-2px;
+  bottom:6%;
+  width:clamp(16px, 46%, 24px);
+  aspect-ratio:1;
+  border-radius:50%;
+  background:var(--ok);
+  display:flex;align-items:center;justify-content:center;
+  z-index:4;
+  box-shadow:0 2px 6px rgba(0,0,0,.4), 0 0 0 2px rgba(255,255,255,.85);
+  pointer-events:none;
+  animation:checkPop .35s cubic-bezier(.5,1.6,.5,1) both;
+}
+.bottle .check-badge svg{
+  width:64%;height:64%;
+  /* SVG-галочка отрисована inline в Render.buildBottle; здесь
+     обеспечиваем контрастный белый штрих. */
+}
+@keyframes checkPop{
+  0%{transform:scale(0);opacity:0}
+  100%{transform:scale(1);opacity:1}
 }
 
 /* Анимация наполнения нового слоя — SVG rect растёт СНИЗУ ВВЕРХ через scaleY:
    жидкость оседает на дно/предыдущий слой и потом «наполняется» до своей
-   высоты. transform-origin:50% 100% (нижняя кромка слоя). */
+   высоты. transform-origin:50% 100% (нижняя кромка слоя).
+   Для мульти-переливания каждый слой получает inline animation-delay,
+   так что они заполняются ПОСЛЕДОВАТЕЛЬНО (без разрывов между слоями). */
 .bottle svg rect.layer.is-new{
   transform-box:fill-box;
   transform-origin:50% 100%;
-  animation:layerFill .4s cubic-bezier(.3,0,.3,1) both;
+  animation:layerFill .32s cubic-bezier(.3,0,.3,1) both;
 }
 @keyframes layerFill{
   0%{transform:scaleY(0);opacity:.4}
@@ -188,12 +215,15 @@ body{
 /* (CSS-классы для цветов слоёв убраны — fill подставляется inline
    в SVG <rect> прямо в Render.buildBottle.) */
 
-/* ===== «+» bottle — полупрозрачная колба для активации бонуса ===== */
+/* ===== «+» bottle — полупрозрачная колба для активации бонуса =====
+   Сам силуэт колбы делаем заметно прозрачнее (контур — currentColor с
+   низкой альфой), а круг «+» внутри SVG нарисован отдельной заливкой
+   (url(#plusBg)) и остаётся полностью непрозрачным. */
 .bottle.bottle-add{
-  color:rgba(255,216,107,.55);
-  filter:drop-shadow(0 4px 8px rgba(0,0,0,.4));
+  color:rgba(255,216,107,.28);
+  filter:drop-shadow(0 3px 6px rgba(0,0,0,.3));
 }
-.bottle.bottle-add:hover{color:var(--accent)}
+.bottle.bottle-add:hover{color:rgba(255,216,107,.55)}
 .bottle.bottle-add .add-plus{
   position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
   width:36px;height:36px;border-radius:50%;
@@ -1465,18 +1495,24 @@ window.Render = (() => {
   const $toast    = document.getElementById('toast');
   const $undo     = document.getElementById('btn-undo');
 
-  // Сложность от размера поля. 5 ступеней по sticks×capacity.
-  // Цвет градирует от зелёного (легко) к малиновому (сложно).
+  // Сложность теперь — параметр УРОВНЯ, определяется в момент генерации:
+  //   - 4 ступени равномерно по оптимальному числу ходов BFS-решения;
+  //   - «Очень сложно» — только для уровней, сгенерированных с
+  //     требованием бонуса (Решаемо только при +1 колбе).
+  // Если решатель не уложился в timeout (level.optimalSteps === null),
+  // fallback'имся в «Сложно». Пороги ниже подобраны эмпирически на
+  // 10 default-уровнях + endless tier.
   const DIFF_TIERS = [
-    { max:  9,       name:'Очень просто',  color:'#7be37b' },
-    { max: 15,       name:'Просто',        color:'#c5e35b' },
-    { max: 22,       name:'Средне',        color:'#ffd23f' },
-    { max: 35,       name:'Сложно',        color:'#ff8a2b' },
-    { max: Infinity, name:'Очень сложно',  color:'#ef3a5d' },
+    { maxSteps:  8,       name:'Очень просто',  color:'#7be37b' },
+    { maxSteps: 16,       name:'Просто',        color:'#c5e35b' },
+    { maxSteps: 26,       name:'Средне',        color:'#ffd23f' },
+    { maxSteps: Infinity, name:'Сложно',        color:'#ff8a2b' },
   ];
-  function getDifficulty(sticks, capacity) {
-    const score = sticks * capacity;
-    return DIFF_TIERS.find(t => score <= t.max);
+  const DIFF_REQUIRES_BONUS = { name:'Очень сложно', color:'#ef3a5d' };
+  function getDifficulty(optimalSteps, requireBonus) {
+    if (requireBonus) return DIFF_REQUIRES_BONUS;
+    if (optimalSteps == null) return DIFF_TIERS[DIFF_TIERS.length - 1]; // fallback: «Сложно»
+    return DIFF_TIERS.find(t => optimalSteps <= t.maxSteps);
   }
 
   function renderAll() {
@@ -1575,6 +1611,12 @@ window.Render = (() => {
     const layerH = LIQ_RANGE / capacity;
     const lastAdded = s.lastAdded;
     const newCount = (lastAdded && lastAdded.idx === idx) ? lastAdded.count : 0;
+    // Длительность одного fill-кадра в секундах — синхронизируем с CSS
+    // (.bottle svg rect.layer.is-new { animation: layerFill .32s }).
+    // Слои в зоне «новых» получают inline animation-delay так, чтобы
+    // нижний слой заполнялся первым, потом следующий и т.д. — без
+    // визуальных разрывов между ними.
+    const LAYER_FILL_S = 0.32;
 
     // Слои: stack[0]=низ, stack[N-1]=верх. В SVG y растёт вниз,
     // поэтому stack[i] кладём на y = LIQ_BOTTOM - (i+1)*layerH.
@@ -1585,9 +1627,21 @@ window.Render = (() => {
       const y = baseY - LAYER_OVERLAP;
       const h = layerH + LAYER_OVERLAP * 2;
       const isNew = i >= stack.length - newCount;
+      // Порядок среди новых: 0 = самый нижний (наполняется первым), далее вверх.
+      const orderFromBottom = isNew ? (i - (stack.length - newCount)) : 0;
+      const delayS = isNew ? orderFromBottom * LAYER_FILL_S : 0;
       const hex = Levels.COLOR_HEX[color] || '#888';
-      return `<rect class="layer${isNew ? ' is-new' : ''}" x="-1214" y="${y.toFixed(2)}" width="3428" height="${h.toFixed(2)}" fill="${hex}"/>`;
+      const delayAttr = isNew && orderFromBottom > 0
+        ? ` style="animation-delay:${delayS.toFixed(3)}s"`
+        : '';
+      return `<rect class="layer${isNew ? ' is-new' : ''}" x="-1214" y="${y.toFixed(2)}" width="3428" height="${h.toFixed(2)}" fill="${hex}"${delayAttr}/>`;
     }).join('');
+
+    // Галочка-бейдж на собранной колбе. Рисуем поверх SVG, чтобы он не
+    // обрезался маской и не зависел от layout слоёв жидкости.
+    const checkBadge = completed
+      ? `<div class="check-badge"><svg viewBox="0 0 24 24" xmlns="${SVG_NS}"><path d="M5 12.5 L10 17 L19 7.5" fill="none" stroke="white" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/></svg></div>`
+      : '';
 
     el.innerHTML = `
       <svg viewBox="${SVG_VIEW}" preserveAspectRatio="xMidYMid meet" xmlns="${SVG_NS}">
@@ -1599,13 +1653,14 @@ window.Render = (() => {
         <g mask="url(#bottleMask${idx})">
           ${layerRects}
         </g>
-        <!-- Обводка (use currentColor → меняется через CSS .selected/.completed) -->
+        <!-- Обводка (currentColor; .selected меняет на жёлтый) -->
         <path d="${OUTLINE_PATH}" fill="currentColor" fill-rule="evenodd"/>
         <!-- Левый внутренний блик -->
         <path d="${HIGHLIGHT_PATH}" fill="white" fill-opacity="0.17"/>
         <!-- Наклонная «таблетка» блика на горлышке -->
         <rect x="102" y="101.098" width="77.0141" height="333.084" rx="38.5071" transform="rotate(-15.1276 102 101.098)" fill="white"/>
       </svg>
+      ${checkBadge}
     `;
     return el;
   }
@@ -1643,7 +1698,10 @@ window.Render = (() => {
     $hudLevel.textContent = s.level;
     if ($hudMoves) $hudMoves.textContent = s.moves;
     if ($hudDiff) {
-      const d = getDifficulty(s.sticks.length, s.capacity);
+      // Сложность — из мета уровня (App.loadLevel запихивает на state в момент
+      // генерации). Если по каким-то причинам ещё не выставлена — fallback в
+      // getDifficulty вернёт «Сложно».
+      const d = getDifficulty(s.optimalSteps, s.requireBonus);
       $hudDiff.textContent = d.name;
       $hudDiff.style.setProperty('--diff-color', d.color);
     }
@@ -1720,6 +1778,16 @@ window.Render = (() => {
       const flyDy = (dstNeckY - srcNeckY) - verticalClearance;
       const tiltDir = (dstNeckX >= srcNeckX) ? 70 : -70;
 
+      // Сколько слоёв переливаем — стрим и хвост анимации зависят от этого.
+      const st0 = State.get();
+      const layerCount = (st0 && st0.lastAdded && st0.lastAdded.idx === dstIdx)
+        ? Math.max(1, st0.lastAdded.count) : 1;
+      const LAYER_FILL_MS = 320;   // sync с CSS .layer.is-new { animation: layerFill .32s }
+      // Стрим живёт ровно столько, сколько идёт последовательное заполнение
+      // всех новых слоёв в приёмнике (плюс пара кадров на хвост). Минимум
+      // 360ms — на одиночный слой.
+      const streamMs = Math.max(360, layerCount * LAYER_FILL_MS + 60);
+
       const FORWARD_MS = 400; // подлёт + наклон в один жест
       const RETURN_MS  = 400; // зеркальный возврат
 
@@ -1731,15 +1799,29 @@ window.Render = (() => {
       src.style.transform  = `translate(${flyDx}px, ${flyDy}px) rotate(${tiltDir}deg)`;
 
       setTimeout(() => {
-        // Фаза B: стрим + bump. Позу держим, source/dst пока pre-move.
-        dst.classList.add('receiving-bump');
+        // Фаза B: стрим + bump.
+        // Сразу пересобираем DST в post-move state — новые слои с .is-new
+        // начнут заполняться последовательно (через inline animation-delay,
+        // см. buildBottle). Это важно: для мульти-перелива надо чтобы каждый
+        // слой успел дорасти до следующего БЕЗ разрывов в анимации.
+        // SRC оставляем pre-move до конца стрима — он визуально «отдаёт»
+        // жидкость, а не теряет слои мгновенно.
+        const s = State.get();
+        const newDst = buildBottle(s.sticks[dstIdx], dstIdx, s.capacity);
+        newDst.classList.add('receiving-bump');
+        dst.replaceWith(newDst);
+        dst = newDst;
+        // Запоминаем lastAdded'ом был ли это тот же dst — он скоро понадобится
+        // при rebuild'е src (там lastAdded должен быть очищен, чтобы newSrc
+        // не пытался применить .is-new). Делаем clear ниже, после src rebuild.
+
         const stream = document.createElement('div');
         stream.className = 'pour-stream';
         stream.style.setProperty('--stream-color', `var(--c-${color}, var(--accent))`);
+        // Удлиняем стрим под общую длительность фазы B.
+        stream.style.animationDuration = `${streamMs}ms`;
         const liveDst = dst.getBoundingClientRect();
         const xStream = liveDst.left + liveDst.width / 2 - 3;
-        // Стрим стартует чуть выше горлышка приёмника, дотягиваясь до
-        // src-pivot'а (который теперь приподнят на verticalClearance).
         const yTop = liveDst.top - Math.max(20, verticalClearance - 6);
         const yBot = liveDst.top + liveDst.height * 0.16;
         stream.style.left   = xStream + 'px';
@@ -1748,10 +1830,9 @@ window.Render = (() => {
         stream.style.width  = '6px';
         document.body.appendChild(stream);
 
-        // Конец стрима → пересборка src/dst (новые слои в dst, верхние
-        // удалены у src). Запускается фаза C (возврат).
+        // Конец стрима → SRC rebuild (теряет верхние перелитые слои) →
+        // фаза C (возврат).
         setTimeout(() => {
-          const s = State.get();
           const keepTransform   = src.style.transform;
           const keepTransition  = src.style.transition;
           const keepOrigin      = src.style.transformOrigin;
@@ -1763,12 +1844,7 @@ window.Render = (() => {
           src.replaceWith(newSrc);
           src = newSrc;
 
-          const newDst = buildBottle(s.sticks[dstIdx], dstIdx, s.capacity);
-          newDst.classList.add('receiving-bump');
-          dst.replaceWith(newDst);
-          dst = newDst;
           if (s.lastAdded) s.lastAdded = null;
-
           stream.remove();
 
           // Фаза C: возврат translate + un-rotate ОДНОВРЕМЕННО.
@@ -1781,7 +1857,7 @@ window.Render = (() => {
             src.style.transformOrigin = '';
             resolve();
           }, RETURN_MS);
-        }, 360);
+        }, streamMs);
       }, FORWARD_MS);
     });
   }
@@ -2474,6 +2550,31 @@ window.App = (() => {
         capacity: params.capacity,
         sticks: bottles.map(s => [...s]),
       });
+
+      // Считаем сложность как мета-параметр УРОВНЯ (а не от размера поля).
+      // Если в params.requireBonus стоит true (уровень сгенерирован с
+      // требованием бонуса) — это сразу «Очень сложно». Иначе считаем
+      // оптимальное число ходов BFS-ом и кладём на state, чтобы renderHud
+      // мог отобразить tier'ом (см. getDifficulty).
+      const s = State.get();
+      s.requireBonus = params.requireBonus === true;
+      // Если у нас уже есть кэшированная мета (savedMeta от дев-панели) —
+      // берём optimalLength оттуда без повторного запуска BFS.
+      const savedMeta = window.Persist && window.Persist.loadGenMeta
+        ? window.Persist.loadGenMeta(levelNum) : null;
+      if (savedMeta && Number.isFinite(savedMeta.optimalLength)) {
+        s.optimalSteps = savedMeta.optimalLength;
+      } else {
+        try {
+          // Таймаут BFS подобран так, чтобы не тормозить переход уровня
+          // даже на «Очень сложно»: на не-решаемых раскладках вернёт null.
+          const sol = Solver.findShortestPath(bottles, params.capacity, 1500);
+          s.optimalSteps = Number.isFinite(sol.length) ? sol.length : null;
+        } catch (_e) {
+          s.optimalSteps = null;
+        }
+      }
+
       session = { levelNum, params };
       Render.renderAll();
       Render.hideWin();
