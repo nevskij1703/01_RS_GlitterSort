@@ -329,6 +329,30 @@ body{
   color:var(--text);font-family:inherit;font-size:12px;cursor:pointer;
 }
 .dev .actions .primary{background:linear-gradient(180deg,#ff7ac6,#b65bff);font-weight:bold}
+.dev .actions .ghost{background:transparent}
+.dev .actions .danger{background:rgba(255,91,115,.18);border-color:rgba(255,91,115,.4);color:#ffb0bd}
+.dev .actions .danger:hover{background:rgba(255,91,115,.3)}
+.dev h3{font-size:13px;color:var(--accent);margin:12px 0 6px;letter-spacing:.3px}
+.dev .le-lvl-btn{
+  flex:0 0 auto;padding:4px 10px;
+  background:rgba(255,255,255,.06);border:1px solid var(--panel-border);
+  border-radius:8px;color:var(--text-dim);font-family:inherit;font-size:11px;cursor:pointer;
+}
+.dev .le-lvl-btn.active{background:var(--accent);color:#1a1238;border-color:var(--accent);font-weight:600}
+.dev .le-lvl-btn:hover:not(.active){background:rgba(255,255,255,.12);color:var(--text)}
+.dev .checkbox{display:flex;align-items:center;gap:6px;color:var(--text);font-size:12px;cursor:pointer}
+.dev pre#le-json{
+  margin:6px 0 0;padding:8px 10px;max-height:160px;overflow:auto;
+  background:rgba(0,0,0,.35);border:1px solid var(--panel-border);border-radius:8px;
+  font-family:'Consolas',monospace;font-size:10px;color:var(--text-dim);
+  white-space:pre-wrap;word-break:break-all;
+}
+.dev .le-type-chip{
+  width:30px;height:28px;border-radius:7px;
+  border:1px solid rgba(255,255,255,.25);cursor:pointer;padding:0;
+  transition:transform .1s;
+}
+.dev .le-type-chip:hover{transform:scale(1.08)}
 .dev .status{
   margin-top:8px;padding:8px 10px;
   background:rgba(255,255,255,.04);
@@ -608,6 +632,14 @@ window.Levels = (() => {
     'cyan','mint','coral',
   ];
 
+  // Hex-значения для подкраски swatch'ей в дев-панели (CSS-варианты не
+  // достать из computed style без вставки в DOM, поэтому держим зеркало).
+  const COLOR_HEX = {
+    pink:'#ff5fa2', orange:'#ff8a2b', yellow:'#ffd23f', lime:'#9bdc2f',
+    teal:'#22d3c8', blue:'#3a8bff',   purple:'#b65bff', crimson:'#ef3a5d',
+    cyan:'#22ddff', mint:'#5be3a0',   coral:'#ff7b6b',
+  };
+
   // 10 default levels. КРИТИЧЕСКОЕ ПРАВИЛО:
   //   colors_count === filled === sticks - emptyStick
   // Каждый цвет занимает ровно ОДНУ полную колбу (capacity единиц).
@@ -649,8 +681,69 @@ window.Levels = (() => {
   const runtimeOverrides = {};
   function setRuntimeOverride(n, cfg) { if (cfg) runtimeOverrides[n] = cfg; else delete runtimeOverrides[n]; }
   function clearRuntimeOverride(n) { delete runtimeOverrides[n]; }
+  function clearAllRuntimeOverrides() {
+    for (const k of Object.keys(runtimeOverrides)) delete runtimeOverrides[k];
+  }
+  function getAllRuntimeOverrides() { return { ...runtimeOverrides }; }
   function getRuntimeOverride(n) { return runtimeOverrides[n] || null; }
   function getLevelCount() { return DEFAULT_LEVELS.length; }
+
+  /**
+   * Свежий уровень-заготовка: минимальные размеры и ПУСТАЯ раскладка
+   * (`bottles: [[],[],[]]`). Пользователь крутит параметры и жмёт
+   * «Сгенерировать», чтобы заполнить колбочки. Размеры умышленно
+   * фиксированы независимо от позиции вставки.
+   */
+  function makeFreshLevelTemplate() {
+    return {
+      sticks: 3, capacity: 2, emptyStick: 1,
+      reward: 100, difficulty: 1,
+      colours: ['pink', 'blue'],
+      generator: 'random-tuned',
+      tuningTimeoutMs: 5000,
+      seed: 1007,
+      bottles: [[], [], []],
+    };
+  }
+
+  /** Вставить пустой уровень после уровня n; сдвигает runtime overrides. */
+  function insertLevelAfter(n) {
+    const idx = Math.max(0, Math.min(DEFAULT_LEVELS.length - 1, n - 1));
+    const fresh = makeFreshLevelTemplate();
+    DEFAULT_LEVELS.splice(idx + 1, 0, fresh);
+    const sortedKeys = Object.keys(runtimeOverrides).map(Number).sort((a, b) => b - a);
+    for (const k of sortedKeys) {
+      if (k >= n + 1) {
+        runtimeOverrides[k + 1] = runtimeOverrides[k];
+        delete runtimeOverrides[k];
+      }
+    }
+    renumber();
+    if (window.Persist?.shiftGenMeta) Persist.shiftGenMeta(n + 1, +1);
+    runtimeOverrides[n + 1] = { ...makeFreshLevelTemplate(), level: n + 1 };
+  }
+
+  /** Удалить уровень n; сдвигает overrides. Не даст удалить последний. */
+  function removeLevel(n) {
+    if (DEFAULT_LEVELS.length <= 1) return false;
+    const idx = Math.max(0, Math.min(DEFAULT_LEVELS.length - 1, n - 1));
+    DEFAULT_LEVELS.splice(idx, 1);
+    delete runtimeOverrides[n];
+    const sortedKeys = Object.keys(runtimeOverrides).map(Number).sort((a, b) => a - b);
+    for (const k of sortedKeys) {
+      if (k > n) {
+        runtimeOverrides[k - 1] = runtimeOverrides[k];
+        delete runtimeOverrides[k];
+      }
+    }
+    renumber();
+    if (window.Persist?.shiftGenMeta) Persist.shiftGenMeta(n, -1);
+    return true;
+  }
+
+  function renumber() {
+    DEFAULT_LEVELS.forEach((lvl, i) => { lvl.level = i + 1; });
+  }
 
   /**
    * Endless mode (L11+). Уровни процедурные. emptyStick всегда = 1,
@@ -960,11 +1053,12 @@ window.Levels = (() => {
   function getLastTuningMeta() { return _lastTuningMeta; }
 
   return {
-    PALETTE, DEFAULT_LEVELS, ENDLESS_TIERS,
+    PALETTE, COLOR_HEX, DEFAULT_LEVELS, ENDLESS_TIERS,
     getParams, generate,
     generateRandomTuned, getLastTuningMeta,
     setRuntimeOverride, clearRuntimeOverride, getRuntimeOverride,
-    getLevelCount,
+    getAllRuntimeOverrides, clearAllRuntimeOverrides,
+    insertLevelAfter, removeLevel, getLevelCount,
   };
 })();
 
@@ -1163,9 +1257,52 @@ window.Persist = (() => {
     return counter > 0 && counter % 2 === 0;
   }
 
+  // Generator meta — отдельный ключ. Хранит "человеко-читаемое" резюме
+  // последней генерации для каждого уровня (attempts/optimal/distance/…),
+  // переживает Persist.clear() игрового прогресса.
+  const META_KEY = 'glitterSort.genMeta.v1';
+  function loadGenMeta(n) {
+    try {
+      const raw = localStorage.getItem(META_KEY);
+      if (!raw) return null;
+      const all = JSON.parse(raw);
+      return all[n] || null;
+    } catch (e) { return null; }
+  }
+  function saveGenMeta(n, meta) {
+    try {
+      const raw = localStorage.getItem(META_KEY);
+      const all = raw ? JSON.parse(raw) : {};
+      all[n] = meta;
+      localStorage.setItem(META_KEY, JSON.stringify(all));
+    } catch (e) {}
+  }
+  function shiftGenMeta(fromN, delta) {
+    try {
+      const raw = localStorage.getItem(META_KEY);
+      if (!raw) return;
+      const all = JSON.parse(raw);
+      const next = {};
+      for (const k of Object.keys(all)) {
+        const n = +k;
+        next[n >= fromN ? n + delta : n] = all[k];
+      }
+      localStorage.setItem(META_KEY, JSON.stringify(next));
+    } catch (e) {}
+  }
+  // Hard reset — стирает ВСЁ (прогресс + meta), используется кнопкой
+  // "Reset всё" в дев-панели.
+  function clear() {
+    try {
+      localStorage.removeItem(KEY);
+      localStorage.removeItem(META_KEY);
+    } catch (e) {}
+  }
+
   return {
     KEY, DEFAULTS, load, save,
-    loadCustomLevel, saveCustomLevel, clearCustomLevel, clearAll,
+    loadCustomLevel, saveCustomLevel, clearCustomLevel, clearAll, clear,
+    loadGenMeta, saveGenMeta, shiftGenMeta,
     bumpInterstitialCounter, shouldShowInterstitial,
   };
 })();
@@ -1351,15 +1488,29 @@ window.Render = (() => {
 })();
 
 /* ============================================================
-   [DEVPANEL] — редактор параметров текущего уровня.
-   Toggle: Ctrl+Shift+D. Состоит из формы и статус-строки.
-   Подробности: docs/LEVELS.md.
+   [DEVPANEL] — редактор уровня + симуляция (BFS).
+   Перенесён из RC_Colbs_v2/game/cheats/tabLevelEditor.js.
+   Toggle: ⚙ в шапке или Ctrl+Shift+D.
+   Flow:
+     1. Юзер выбирает цвет для каждого из 11 типов пончиков (cycle palette).
+        Смена цвета НЕ перегенерирует — мапит цвета к кэшу abstractBottles.
+     2. Юзер правит параметры (sticks/capacity/empty/diff/reward/timeout).
+        Правки не применяются автоматически — поле ждёт «Сгенерировать».
+     3. Generate (random-tuned) с абстрактными цветами palette[0..N-1],
+        результат кэшируется как working.abstractBottles, затем мапится
+        в пользовательские цвета.
+   Симуляция (Анализ + Автопроход) — наша секция, не было в оригинале.
    ============================================================ */
 window.DevPanel = (() => {
   const $panel = document.getElementById('dev-panel');
   const $body  = document.getElementById('dev-body');
   const $close = document.getElementById('dev-close');
   let isOpen = false;
+  let working = null;
+  let editingLevel = 1;
+  let easyModeMaxAttempts = 100;
+  let distinctLayers = true;
+  let easyMode = true;
 
   function open() {
     isOpen = true;
@@ -1377,7 +1528,577 @@ window.DevPanel = (() => {
     }
   });
 
+  function $(sel) { return $body.querySelector(sel); }
+  function clamp(v, lo, hi) {
+    if (!Number.isFinite(v)) return lo;
+    return Math.max(lo, Math.min(hi, v | 0));
+  }
+  function formatSec(ms) {
+    if (ms < 1000) return `${ms.toFixed(0)}ms`;
+    return `${(ms / 1000).toFixed(2)}s`;
+  }
+
+  const HTML = `
+    <h3>Уровень для редактирования</h3>
+    <div class="dev-row" id="le-lvl-row" style="flex-wrap:wrap">
+      <label style="flex:0 0 auto;">Уровень</label>
+      <span id="le-lvl-buttons" style="display:contents;"></span>
+      <input type="number" id="le-lvl-n" min="1" step="1" placeholder="N" style="width:60px;flex:0 0 60px;">
+      <button id="le-lvl-go" class="ghost">Go</button>
+    </div>
+    <div class="actions" style="margin-top:2px;">
+      <button id="le-lvl-add" class="ghost">+ Добавить</button>
+      <button id="le-lvl-del" class="danger">− Удалить</button>
+    </div>
+
+    <h3>Цвета жидкости (тип пончиков)</h3>
+    <p style="margin:4px 0 6px;color:var(--text-dim);font-size:11px;">
+      Клик по чипу — следующий цвет из палитры. Типы за пределами
+      <i>sticks − emptyStick</i> остаются настраиваемыми, но визуально неактивны.
+    </p>
+    <div class="dev-row" id="le-types-row" style="gap:6px;flex-wrap:wrap"></div>
+
+    <h3>Параметры (применятся при генерации)</h3>
+    <div class="dev-row"><label>Столбики</label><input type="number" id="le-sticks" min="2" max="12" step="1"></div>
+    <div class="dev-row"><label>Объём</label><input type="number" id="le-cap" min="2" max="6" step="1"></div>
+    <div class="dev-row"><label>Пустых столбиков</label><input type="number" id="le-empty" min="0" step="1"></div>
+    <div class="dev-row"><label>Кол-во ходов</label><input type="number" id="le-diff" min="1" max="1000" step="1"></div>
+    <div class="dev-row"><label>Опыт</label><input type="number" id="le-reward" min="0" step="1"></div>
+    <div class="dev-row">
+      <label>Тайм-аут</label>
+      <input type="number" id="le-gen-tuneout" min="0.1" max="600" step="0.5" style="flex:0 0 80px;"> <span style="color:var(--text-dim)">сек</span>
+    </div>
+    <div class="dev-row">
+      <label>Попыток (Easy Mode)</label>
+      <input type="number" id="le-easy-attempts" min="1" max="100000" step="10" style="flex:0 0 80px;">
+    </div>
+    <label class="checkbox" style="margin:6px 0 2px;">
+      <input type="checkbox" id="le-easy-mode">
+      Easy Mode (без тупиков)
+    </label>
+    <p style="margin:0 0 4px;color:var(--text-dim);font-size:11px;">
+      Перебираем кандидатов и принимаем только тот, где из любого достижимого
+      состояния можно дойти до решения. Если за указанное число попыток
+      не нашлось — выводится сообщение об ошибке.
+    </p>
+    <label class="checkbox" style="margin:6px 0 2px;">
+      <input type="checkbox" id="le-distinct-layers">
+      Разные цвета на одном слое
+    </label>
+    <p style="margin:0 0 4px;color:var(--text-dim);font-size:11px;">
+      На каждой горизонтальной строке (на одной высоте) все пончики будут разных цветов.
+      Эмпирически ускоряет Easy-Mode-генерацию: такие раскладки чаще оказываются без тупиков.
+    </p>
+
+    <div class="actions" style="margin-top:10px;">
+      <button id="le-generate" class="primary" style="flex:1;font-weight:600;padding:10px;">🎲 Сгенерировать</button>
+    </div>
+    <p id="le-gen-status" style="color:var(--text-dim);font-size:11px;margin:4px 0;min-height:14px;"></p>
+    <p id="le-gen-pending" style="color:#ffae54;font-size:11px;margin:4px 0;min-height:14px;"></p>
+
+    <h3>JSON (правки всех уровней)</h3>
+    <p style="margin:4px 0 6px;color:var(--text-dim);font-size:11px;">
+      Один документ со всеми накопленными правками уровней.
+    </p>
+    <div class="actions">
+      <button id="le-copy">Copy JSON</button>
+      <button id="le-clear" class="ghost">Сбросить runtime</button>
+    </div>
+    <span id="le-stats" style="color:var(--text-dim);font-size:11px;display:block;margin-top:4px"></span>
+    <pre id="le-json"></pre>
+
+    <h3>Сброс</h3>
+    <div class="actions">
+      <button id="le-reset" class="danger">Reset L?</button>
+      <button id="le-reset-all" class="danger">Reset всё</button>
+    </div>
+    <p style="margin:4px 0 8px;color:var(--text-dim);font-size:11px;">
+      <b>Reset L?</b> — сброс runtime-правок текущего уровня.<br>
+      <b>Reset всё</b> — полный сброс localStorage (как при первом открытии).
+    </p>
+
+    <h3>🧠 Симуляция (BFS)</h3>
+    <div class="actions">
+      <button id="dv-analyze">🔍 Анализ</button>
+      <button id="dv-autoplay" class="primary">▶ Автопроход</button>
+      <button id="dv-stop">⏹ Стоп</button>
+    </div>
+    <div class="dev-row">
+      <label>Тайм-аут BFS (мс)</label>
+      <input type="number" id="dv-bfs-timeout" min="100" max="30000" step="500" value="3000">
+      <label style="flex:0 0 auto">Шаг (мс)</label>
+      <input type="number" id="dv-autoplay-delay" min="100" max="3000" step="50" value="450" style="flex:0 0 80px">
+    </div>
+    <div class="status" id="dv-sim-status">Нажми «Анализ» для оптимального пути.</div>
+  `;
+
   function render() {
+    $body.innerHTML = HTML;
+    wire();
+    refreshLevelButtons();
+    loadIntoUI(State.get()?.level || 1);
+  }
+
+  function refreshLevelButtons() {
+    const wrap = $('#le-lvl-buttons');
+    if (!wrap) return;
+    const count = Levels.getLevelCount();
+    wrap.innerHTML = '';
+    for (let n = 1; n <= count; n++) {
+      const b = document.createElement('button');
+      b.dataset.lvl = String(n);
+      b.className = 'le-lvl-btn';
+      b.textContent = `L${n}`;
+      b.addEventListener('click', () => switchLevel(+b.dataset.lvl));
+      wrap.appendChild(b);
+    }
+    refreshActiveLevelButton();
+  }
+
+  function refreshActiveLevelButton() {
+    $body.querySelectorAll('.le-lvl-btn').forEach(b => {
+      b.classList.toggle('active', +b.dataset.lvl === editingLevel);
+    });
+    const reset = $('#le-reset');
+    if (reset) reset.textContent = `Reset L${editingLevel}`;
+  }
+
+  function wire() {
+    $('#le-lvl-go').addEventListener('click', () => {
+      const n = +$('#le-lvl-n').value | 0;
+      if (n >= 1) switchLevel(n);
+    });
+    $('#le-lvl-add').addEventListener('click', () => {
+      Levels.insertLevelAfter(editingLevel);
+      Render.toast(`Добавлен уровень L${editingLevel + 1}`);
+      refreshLevelButtons();
+      switchLevel(editingLevel + 1);
+    });
+    $('#le-lvl-del').addEventListener('click', () => {
+      const removed = editingLevel;
+      const ok = Levels.removeLevel(removed);
+      if (!ok) { Render.toast('Нельзя удалить последний уровень'); return; }
+      Render.toast(`Удалён L${removed}`);
+      const newCount = Levels.getLevelCount();
+      const target = Math.max(1, Math.min(newCount, removed));
+      refreshLevelButtons();
+      switchLevel(target);
+    });
+
+    ['#le-sticks', '#le-cap', '#le-empty', '#le-diff'].forEach(sel => {
+      $(sel).addEventListener('change', () => { readScalarsIntoWorking(); markPending(); });
+    });
+    $('#le-reward').addEventListener('change', () => {
+      working.reward = Math.max(0, +$('#le-reward').value | 0);
+      pushCurrentToRuntime();
+    });
+    $('#le-gen-tuneout').addEventListener('change', () => {
+      const sec = Math.max(0.1, Math.min(600, +$('#le-gen-tuneout').value || 5));
+      $('#le-gen-tuneout').value = sec;
+      working.tuningTimeoutMs = Math.round(sec * 1000);
+    });
+    $('#le-easy-attempts').addEventListener('change', () => {
+      const n = Math.max(1, Math.min(100000, +$('#le-easy-attempts').value | 0 || 100));
+      $('#le-easy-attempts').value = n;
+      easyModeMaxAttempts = n;
+    });
+    $('#le-distinct-layers').addEventListener('change', (e) => { distinctLayers = !!e.target.checked; });
+    $('#le-easy-mode').addEventListener('change', (e) => { easyMode = !!e.target.checked; });
+
+    $('#le-generate').addEventListener('click', generateNow);
+    $('#le-copy').addEventListener('click', copyJson);
+    $('#le-clear').addEventListener('click', clearAllRuntime);
+    $('#le-reset').addEventListener('click', resetCurrentLevel);
+    $('#le-reset-all').addEventListener('click', resetAll);
+
+    $('#dv-analyze').addEventListener('click', onAnalyze);
+    $('#dv-autoplay').addEventListener('click', onAutoplay);
+    $('#dv-stop').addEventListener('click', onStop);
+  }
+
+  // --- Level switching ---
+  function switchLevel(n) {
+    if (!Number.isFinite(n) || n < 1) return;
+    App.loadLevel(n);
+    loadIntoUI(n);
+  }
+
+  function loadIntoUI(level) {
+    editingLevel = level;
+    refreshActiveLevelButton();
+
+    const params = Levels.getParams(level);
+    const filled = (params.sticks ?? 1) - (params.emptyStick ?? 0);
+
+    // 11-slot colour array: per-level → palette padding для лишних чипов.
+    const baseColours = Array.isArray(params.colours) ? [...params.colours] : [];
+    for (let i = baseColours.length; i < 11; i++) {
+      baseColours.push(Levels.PALETTE[i % Levels.PALETTE.length]);
+    }
+
+    // Reverse-mapping текущих колб в abstract palette[0..filled-1]: позволяет
+    // менять цвета чипами без перегенерации.
+    let abstractBottles = null;
+    const s = State.get();
+    if (s && s.level === level && Array.isArray(s.sticks)) {
+      const inverseMap = {};
+      for (let i = 0; i < filled; i++) inverseMap[baseColours[i]] = Levels.PALETTE[i];
+      abstractBottles = s.sticks.map(stack =>
+        stack.map(c => inverseMap[c] !== undefined ? inverseMap[c] : c));
+    }
+
+    working = {
+      sticks:     params.sticks,
+      capacity:   params.capacity,
+      emptyStick: params.emptyStick ?? 1,
+      reward:     params.reward ?? 100,
+      difficulty: params.difficulty ?? 50,
+      colours:    baseColours,
+      tuningTimeoutMs: params.tuningTimeoutMs ?? 5000,
+      abstractBottles,
+    };
+    $('#le-sticks').value = working.sticks;
+    $('#le-cap').value    = working.capacity;
+    $('#le-empty').value  = working.emptyStick;
+    $('#le-diff').value   = working.difficulty;
+    $('#le-reward').value = working.reward;
+    $('#le-gen-tuneout').value = (working.tuningTimeoutMs / 1000).toString();
+    $('#le-easy-attempts').value = easyModeMaxAttempts;
+    $('#le-distinct-layers').checked = distinctLayers;
+    $('#le-easy-mode').checked = easyMode;
+
+    renderTypesRow();
+    clearPending();
+
+    const savedMeta = Persist.loadGenMeta(level);
+    if (savedMeta) showTuningMeta(savedMeta);
+    else $('#le-gen-status').textContent = '';
+
+    renderJson();
+    setSimStatus('Нажми «Анализ» для оптимального пути.');
+  }
+
+  function readScalarsIntoWorking() {
+    const sticks   = clamp(+$('#le-sticks').value || 0, 2, 12);
+    const capacity = clamp(+$('#le-cap').value || 0, 2, 6);
+    const empty    = clamp(+$('#le-empty').value || 0, 0, sticks - 1);
+    const diff     = clamp(+$('#le-diff').value || 0, 1, 1000);
+    working.sticks = sticks;
+    working.capacity = capacity;
+    working.emptyStick = empty;
+    working.difficulty = diff;
+    $('#le-sticks').value = sticks;
+    $('#le-cap').value    = capacity;
+    $('#le-empty').value  = empty;
+    $('#le-diff').value   = diff;
+  }
+
+  function markPending() {
+    const note = $('#le-gen-pending');
+    if (note) note.textContent = '⚠ Параметры изменены — нажмите Сгенерировать чтобы применить';
+  }
+  function clearPending() {
+    const note = $('#le-gen-pending');
+    if (note) note.textContent = '';
+  }
+
+  // 11 цветовых чипов, кликом — следующий цвет палитры.
+  function renderTypesRow() {
+    const wrap = $('#le-types-row');
+    wrap.innerHTML = '';
+    const filled = working.sticks - working.emptyStick;
+    for (let i = 0; i < 11; i++) {
+      const colour = working.colours[i] || Levels.PALETTE[i % Levels.PALETTE.length];
+      const inUse = i < filled;
+      const cell = document.createElement('div');
+      cell.style.cssText = `display:flex;flex-direction:column;align-items:center;gap:2px;opacity:${inUse ? 1 : 0.4};`;
+      const label = document.createElement('span');
+      label.textContent = (i + 1).toString();
+      label.style.cssText = 'color:var(--text-dim);font-size:10px;';
+      const chip = document.createElement('button');
+      chip.className = 'le-type-chip';
+      chip.dataset.idx = String(i);
+      chip.title = 'Клик — следующий цвет';
+      chip.style.background = Levels.COLOR_HEX[colour] || '#888';
+      chip.addEventListener('click', () => {
+        const idx = +chip.dataset.idx;
+        const cur = working.colours[idx];
+        const palIdx = Levels.PALETTE.indexOf(cur);
+        const next = Levels.PALETTE[(palIdx + 1) % Levels.PALETTE.length];
+        working.colours[idx] = next;
+        chip.style.background = Levels.COLOR_HEX[next];
+        applyColoursAndPush();
+      });
+      cell.appendChild(label);
+      cell.appendChild(chip);
+      wrap.appendChild(cell);
+    }
+  }
+
+  // --- Generation & runtime push ---
+
+  function buildConfig() {
+    const filled = working.sticks - working.emptyStick;
+    const seed = (editingLevel | 0) * 1000 + 7;
+    return {
+      sticks:     working.sticks,
+      capacity:   working.capacity,
+      emptyStick: working.emptyStick,
+      reward:     working.reward,
+      difficulty: working.difficulty,
+      colours:    working.colours.slice(0, Math.max(filled, 1)),
+      seed,
+      generator: 'random-tuned',
+      tuningTimeoutMs: working.tuningTimeoutMs,
+    };
+  }
+
+  function applyColoursAndPush() {
+    const cfg = buildConfig();
+    if (working.abstractBottles) {
+      const filled = working.sticks - working.emptyStick;
+      const map = {};
+      for (let i = 0; i < filled; i++) map[Levels.PALETTE[i]] = working.colours[i];
+      cfg.bottles = working.abstractBottles.map(stack =>
+        stack.map(c => (map[c] !== undefined ? map[c] : c)));
+    }
+    Levels.setRuntimeOverride(editingLevel, cfg);
+    App.loadLevel(editingLevel);
+    renderJson();
+  }
+  function pushCurrentToRuntime() { applyColoursAndPush(); }
+
+  function generateNow() {
+    readScalarsIntoWorking();
+    const filled = working.sticks - working.emptyStick;
+    const status = $('#le-gen-status');
+    if (status) status.textContent = `считаю… (до ${(working.tuningTimeoutMs / 1000).toFixed(1)}с)`;
+    clearPending();
+
+    // Используем setTimeout вместо rAF, чтобы статус успел отрендериться
+    // даже в фоновых preview-вкладках (rAF там пейзится браузером).
+    setTimeout(() => {
+      const seed = (editingLevel | 0) * 1000 + 7 + Math.floor(Math.random() * 1_000_000);
+      const meta = Levels.generateRandomTuned({
+        level: editingLevel,
+        sticks: working.sticks,
+        capacity: working.capacity,
+        emptyStick: working.emptyStick,
+        difficulty: working.difficulty,
+        colours: Levels.PALETTE.slice(0, Math.max(filled, 1)),  // abstract
+        tuningTimeoutMs: working.tuningTimeoutMs,
+        seed,
+        multiTransfer: true,
+        easyMode,
+        easyModeMaxAttempts,
+        distinctLayers,
+      });
+      working.abstractBottles = meta.bottles;
+      const persistableMeta = { ...meta };
+      delete persistableMeta.bottles;
+      Persist.saveGenMeta(editingLevel, persistableMeta);
+      showTuningMeta(meta);
+      applyColoursAndPush();
+    });
+  }
+
+  function showTuningMeta(meta) {
+    const status = $('#le-gen-status');
+    if (!status) return;
+    if (meta.easyModeFailed) {
+      status.innerHTML =
+        `<span style="color:#e87">❌ Easy Mode: за ${meta.attempts} попыток не нашёл `
+        + `раскладку без тупиков. Попробуй уменьшить difficulty, увеличить пустых `
+        + `столбиков или уменьшить число цветов. (решаемых: ${meta.solvableAttempts}, `
+        + `${formatSec(meta.elapsedMs)})</span>`;
+      return;
+    }
+    if (meta.fallback) {
+      status.innerHTML = `<span style="color:#e87">⚠ не нашёл решаемой раскладки за ${formatSec(meta.elapsedMs)}; fallback на reverse-shuffle</span>`;
+      return;
+    }
+    const exact = meta.achievedExact
+      ? `<span style="color:#7e7">точно ${meta.optimalLength} ход.</span>`
+      : `<span style="color:#fb7">≈ ${meta.optimalLength} ход. (цель ${meta.target}, отклонение ${meta.distance})</span>`;
+    const easyTag = meta.easyMode
+      ? ` · <span style="color:#7e7">no dead-ends ✓</span>`
+      : '';
+    status.innerHTML =
+      `${exact} · попыток: ${meta.attempts} (решаемых: ${meta.solvableAttempts}) · ${formatSec(meta.elapsedMs)}${easyTag}`;
+  }
+
+  // --- JSON envelope ---
+
+  function buildEnvelope() {
+    const all = Levels.getAllRuntimeOverrides();
+    return {
+      _task:
+        'Применить как baseline в Levels.DEFAULT_LEVELS внутри index.html. ' +
+        'Для каждого ключа N в changes — заменить объект уровня N в Levels.DEFAULT_LEVELS ' +
+        '(или ДОБАВИТЬ новый элемент, если N выходит за длину массива; ключи идут подряд от 1, ' +
+        'без пропусков) этими полями: sticks, capacity, emptyStick, reward, difficulty, colours, ' +
+        'generator, tuningTimeoutMs, seed, bottles. ' +
+        'Поле bottles — кэш сгенерированной раскладки; кладётся в DEFAULT_LEVELS и используется ' +
+        'напрямую при загрузке уровня (без вызова генератора). ' +
+        'Если bottles равен [[],[],[]] (или иначе содержит только пустые столбики) — это уровень-' +
+        'заготовка: пользователь добавил его кнопкой «+ Добавить», но не нажал «Сгенерировать». ' +
+        'Перед интеграцией нужно сгенерировать раскладку через random-tuned-генератор ' +
+        'или вернуть пользователю с просьбой нажать Сгенерировать.',
+      changes: all,
+    };
+  }
+
+  function renderJson() {
+    const env = buildEnvelope();
+    $('#le-json').textContent = JSON.stringify(env, null, 2);
+    const stats = $('#le-stats');
+    if (stats) {
+      const n = Object.keys(env.changes).length;
+      stats.textContent = n === 0 ? '— нет изменений' : `— уровней с правками: ${n}`;
+    }
+  }
+
+  async function copyJson() {
+    const text = $('#le-json').textContent;
+    try {
+      await navigator.clipboard.writeText(text);
+      Render.toast('JSON скопирован');
+    } catch (_e) {
+      const range = document.createRange();
+      range.selectNode($('#le-json'));
+      const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range);
+      Render.toast('Не удалось получить clipboard, выделил текст вручную');
+    }
+  }
+
+  // --- Resets ---
+
+  function resetCurrentLevel() {
+    Levels.clearRuntimeOverride(editingLevel);
+    App.loadLevel(editingLevel);
+    loadIntoUI(editingLevel);
+    Render.toast(`Reset L${editingLevel}`);
+  }
+  function clearAllRuntime() {
+    Levels.clearAllRuntimeOverrides();
+    App.loadLevel(editingLevel);
+    loadIntoUI(editingLevel);
+    Render.toast('Runtime-правки сброшены');
+  }
+  function resetAll() {
+    Persist.clear();
+    Render.toast('Полный сброс — перезагрузка…');
+    setTimeout(() => location.reload(), 250);
+  }
+
+  // --- Симуляция (наша секция) ---
+
+  let _autoplay = { running: false, abort: false };
+
+  function setSimStatus(msg, kind) {
+    const el = $('#dv-sim-status');
+    if (!el) return;
+    el.textContent = msg;
+    el.style.color = kind === 'err' ? 'var(--danger)' : kind === 'ok' ? 'var(--ok)' : 'var(--text-dim)';
+  }
+
+  function onAnalyze() {
+    const s = State.get();
+    if (!s) return;
+    if (Solver.isSolved(s.sticks, s.capacity)) { setSimStatus('Уровень уже решён.', 'ok'); return; }
+    const tBfs = +$('#dv-bfs-timeout').value || 3000;
+    setSimStatus('BFS-поиск...');
+    setTimeout(() => {
+      const t0 = performance.now();
+      const sol = Solver.findShortestPath(s.sticks, s.capacity, tBfs, { multiTransfer: true });
+      const tDead = Math.min(2000, Math.floor(tBfs / 3));
+      const dead = Solver.findReachableDeadEnds(s.sticks, s.capacity, { multiTransfer: true, timeLimitMs: tDead });
+      const ms = (performance.now() - t0) | 0;
+      if (sol.length === null) {
+        setSimStatus(`✗ Решение не найдено за ${tBfs}мс (explored=${sol.explored}, exhausted=${sol.exhausted}).`, 'err');
+        return;
+      }
+      const firstMove = sol.firstMove
+        ? `${sol.firstMove.from}→${sol.firstMove.to}×${sol.firstMove.count}`
+        : '—';
+      const deadStr = dead.exhausted
+        ? (dead.ok ? 'без тупиков ✓' : `тупиков=${dead.deadEnds}/${dead.reachable} ✗`)
+        : 'dead-end check: timeout';
+      setSimStatus(
+        `✓ optimal=${sol.length} ходов, первый=${firstMove}\nexplored=${sol.explored} states, ${deadStr}, ${ms}мс`,
+        'ok'
+      );
+    }, 30);
+  }
+
+  async function onAutoplay() {
+    const s = State.get();
+    if (!s) return;
+    if (_autoplay.running) { setSimStatus('Уже играет — нажми «Стоп».', 'err'); return; }
+    if (Solver.isSolved(s.sticks, s.capacity)) { setSimStatus('Уровень уже решён.', 'ok'); return; }
+    const tBfs = +$('#dv-bfs-timeout').value || 3000;
+    const delay = Math.max(80, +$('#dv-autoplay-delay').value || 450);
+    _autoplay.running = true;
+    _autoplay.abort = false;
+    setSimStatus('▶ Автопроход начался...');
+    let steps = 0;
+    const startMoves = s.moves;
+    try {
+      while (!_autoplay.abort) {
+        const cur = State.get();
+        if (!cur) break;
+        if (Solver.isSolved(cur.sticks, cur.capacity)) break;
+        const sol = Solver.findShortestPath(cur.sticks, cur.capacity, tBfs, { multiTransfer: true });
+        if (!sol || sol.firstMove == null) {
+          setSimStatus(`✗ Симулятор не нашёл следующий ход (после ${steps} шагов).`, 'err');
+          _autoplay.running = false;
+          return;
+        }
+        const { from, to } = sol.firstMove;
+        await clickStickViaDOM(from);
+        await sleep(60);
+        await clickStickViaDOM(to);
+        steps++;
+        setSimStatus(`▶ Шаг ${steps}: ${from}→${to}×${sol.firstMove.count}, осталось ~${(sol.length - 1)|0} ходов`);
+        await sleep(delay);
+      }
+      const cur = State.get();
+      const totalMoves = cur ? cur.moves - startMoves : steps;
+      if (cur && Solver.isSolved(cur.sticks, cur.capacity)) {
+        setSimStatus(`✓ Победа! ${totalMoves} ходов сделано автопроходом.`, 'ok');
+      } else if (_autoplay.abort) {
+        setSimStatus(`⏹ Остановлено на ${steps} шаге.`);
+      }
+    } catch (e) {
+      console.error(e);
+      setSimStatus('Ошибка: ' + e.message, 'err');
+    } finally {
+      _autoplay.running = false;
+    }
+  }
+
+  function onStop() {
+    if (_autoplay.running) _autoplay.abort = true;
+    else setSimStatus('Автопроход не запущен.');
+  }
+
+  function clickStickViaDOM(idx) {
+    return new Promise(resolve => {
+      const sticks = document.getElementById('sticks');
+      if (!sticks || !sticks.children[idx]) { resolve(); return; }
+      sticks.children[idx].click();
+      requestAnimationFrame(() => resolve());
+    });
+  }
+  function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+  return { open, close, toggle, render };
+})();
+
+// Старый DevPanel-код удалён ниже; финализируем секцию.
+;(() => { return;
+  /* legacy stub kept silenced via early-return — body discarded below */
+  function _legacy_render() {
     const s = State.get();
     if (!s) return;
     const cur = Levels.getParams(s.level);
