@@ -140,10 +140,12 @@ body{
 .bottle{
   /* Колба рисуется как inline-SVG внутри .bottle (см. Render.buildBottle).
      Контур (outline path) использует currentColor — меняем цвет состояния
-     через CSS color: вместо filter-обводки. */
+     через CSS color: вместо filter-обводки.
+     --bottle-max — пиксельный лимит ширины, считается JS-ом в Render.fitBottles()
+     с учётом числа колб (для 12 шт. колбы ужимаются, чтобы 3 ряда влезли). */
   position:relative;
   width:100%;
-  max-width:78px;
+  max-width:var(--bottle-max, 78px);
   aspect-ratio:1051 / 3484.75;
   cursor:pointer;
   color:#ffffff;
@@ -165,10 +167,12 @@ body{
   filter:drop-shadow(0 0 12px rgba(123,227,123,.5)) drop-shadow(0 6px 12px rgba(0,0,0,.42));
 }
 
-/* Анимация наполнения нового слоя — SVG rect растёт сверху вниз через scaleY. */
+/* Анимация наполнения нового слоя — SVG rect растёт СНИЗУ ВВЕРХ через scaleY:
+   жидкость оседает на дно/предыдущий слой и потом «наполняется» до своей
+   высоты. transform-origin:50% 100% (нижняя кромка слоя). */
 .bottle svg rect.layer.is-new{
   transform-box:fill-box;
-  transform-origin:50% 0%;
+  transform-origin:50% 100%;
   animation:layerFill .4s cubic-bezier(.3,0,.3,1) both;
 }
 @keyframes layerFill{
@@ -1485,7 +1489,50 @@ window.Render = (() => {
     if (s.lastAdded) s.lastAdded = null;
     renderHud();
     renderActionButtons();
+    fitBottles();
   }
+
+  /**
+   * Подгоняет ширину колб (--bottle-max) так, чтобы все колбы влезали и по
+   * ширине поля, и по доступной высоте. CSS-grid задаёт колонки по
+   * data-count, мы лишь зажимаем max-width у `.bottle`.
+   *
+   * Для 12 колб (4×3 grid) на телефонном экране даже 78px на колбу не лезет
+   * по высоте: 3 ряда × ~258px = ~774px > доступного field. Этот код
+   * ужимает колбы пропорционально, держа aspect-ratio.
+   */
+  // Та же таблица колонок, что в CSS (.sticks[data-count="N"]). 1 ряд по
+  // умолчанию N столбцов; чтобы рисунок не растягивался, для 6+ переходим
+  // на 2 ряда (3-4-5 столбцов).
+  const GRID_COLS = {3:3,4:4,5:5,6:3,7:4,8:4,9:5,10:5,11:4,12:4,13:5};
+  const BOTTLE_ASPECT_W_OVER_H = 1051 / 3484.75; // ≈ 0.3016
+
+  function fitBottles() {
+    const field = document.querySelector('.field');
+    if (!field || !$sticks) return;
+    const dataCount = parseInt($sticks.dataset.count || '0', 10);
+    if (!dataCount) return;
+    const cols = GRID_COLS[dataCount] || Math.min(dataCount, 5);
+    const rows = Math.ceil(dataCount / cols);
+
+    const fieldRect = field.getBoundingClientRect();
+    if (!fieldRect.width || !fieldRect.height) return;
+
+    const sticksStyle = getComputedStyle($sticks);
+    const gap = parseFloat(sticksStyle.rowGap) || 12;
+    // .sticks: max-width 560, padding 8px (box-sizing:border-box).
+    // .field:  padding 8px.
+    const contentW = Math.min(fieldRect.width - 16, 560 - 16);
+    const contentH = fieldRect.height - 16;
+
+    const maxByWidth  = (contentW - (cols - 1) * gap) / cols;
+    const maxByHeight = ((contentH - (rows - 1) * gap) / rows) * BOTTLE_ASPECT_W_OVER_H;
+
+    const bottleMax = Math.max(40, Math.floor(Math.min(78, maxByWidth, maxByHeight)));
+    document.documentElement.style.setProperty('--bottle-max', bottleMax + 'px');
+  }
+  // Реагируем на ресайз окна (поворот экрана, devtools и т.п.).
+  window.addEventListener('resize', () => fitBottles());
 
   // === Inline-SVG модель колбы (исходник пользователя из Figma) ===
   // viewBox 999×4378. Внутри:
@@ -1628,13 +1675,22 @@ window.Render = (() => {
    * Источник подлетает ГОРЛЫШКОМ к горлышку приёмника и наклоняется
    * относительно своего горлышка (pivot = верхняя точка колбы).
    *
-   * Шаги (≈1.05s total):
-   *   1. translate так, чтобы горлышко источника оказалось чуть выше
-   *      горлышка приёмника (320ms)
-   *   2. rotate ~70° (clockwise если dst справа от src) вокруг pivot —
-   *      горлышко остаётся на месте, тело уходит в сторону (200ms)
-   *   3. появляется струйка между горлышками + bump приёмника
-   *   4. возврат: rotate→0, затем translate→0 (300ms)
+   * Шаги (≈1.24s total):
+   *   A. translate на 80% дистанции БЕЗ вращения (260ms). Колба ещё в
+   *      стороне от приёмника, силуэты не перекрываются.
+   *   B. finishing 20% translate + rotate ~70° ОДНОВРЕМЕННО (180ms).
+   *      Пока колба «доезжает», она уже наклоняется — её тело уходит
+   *      в сторону, поэтому в финальной позиции колбы не сливаются
+   *      в один силуэт.
+   *   C. появляется струйка между горлышками + bump приёмника, держим
+   *      позу (≈360ms). После стрима пересобираем src/dst в post-move.
+   *   D. un-rotate + back to 80% translate ОДНОВРЕМЕННО (180ms) — обратная
+   *      симметрия фазе B: колба выпрямляется И отъезжает от приёмника.
+   *   E. translate с 80% → 0%, без вращения (260ms).
+   *
+   * Дополнительный вертикальный зазор (verticalClearance) приподнимает
+   * горлышко источника так, чтобы во время наклона его дно не касалось
+   * корпуса приёмника. Зависит от высоты колбы (увеличен пропорционально).
    */
   function animatePour(srcIdx, dstIdx, color) {
     return new Promise(resolve => {
@@ -1649,33 +1705,41 @@ window.Render = (() => {
       const dstNeckX = dstRect.left + dstRect.width / 2;
       const dstNeckY = dstRect.top + dstRect.height * 0.04;
 
+      // Вертикальный зазор между горлышками: чем выше колба, тем больше
+      // зазор. Это нужно чтобы при наклоне в 70° тело источника проходило
+      // выше тела приёмника, не задевая его. Минимум 44px на маленьких колбах.
+      const verticalClearance = Math.max(44, Math.round(srcRect.height * 0.28));
+
       const flyDx = dstNeckX - srcNeckX;
-      const flyDy = (dstNeckY - srcNeckY) - 22;
+      const flyDy = (dstNeckY - srcNeckY) - verticalClearance;
       const tiltDir = (dstNeckX >= srcNeckX) ? 70 : -70;
+      // Промежуточная точка — 80% пути; в ней начинается вращение.
+      const txMid = flyDx * 0.8;
+      const tyMid = flyDy * 0.8;
 
       src.classList.add('pouring');
       src.style.transformOrigin = '50% 4%';
-      // Шаг 1: подлёт
-      src.style.transition = 'transform .32s cubic-bezier(.3,0,.25,1)';
-      src.style.transform  = `translate(${flyDx}px, ${flyDy}px)`;
+
+      // Фаза A: подлёт на 80% без вращения.
+      src.style.transition = 'transform .26s cubic-bezier(.3,0,.3,1)';
+      src.style.transform  = `translate(${txMid}px, ${tyMid}px)`;
 
       setTimeout(() => {
-        // Шаг 2: наклон (горлышко на месте, тело отлетает)
-        src.style.transition = 'transform .22s cubic-bezier(.4,0,.3,1)';
+        // Фаза B: доезжаем оставшиеся 20% + одновременно крутимся в наклон.
+        src.style.transition = 'transform .18s cubic-bezier(.4,0,.3,1)';
         src.style.transform  = `translate(${flyDx}px, ${flyDy}px) rotate(${tiltDir}deg)`;
 
         setTimeout(() => {
-          // Шаг 3: появляется струйка. Source ОСТАВЛЯЕМ pre-move
-          // (со всеми слоями) — он будет «выпускать» жидкость постепенно
-          // визуально, пока стрим течёт. Dst тоже пока pre-move — новый
-          // слой проявится в конце стрима.
+          // Фаза C: стрим. Source/dst пока pre-move (со всеми слоями).
           dst.classList.add('receiving-bump');
           const stream = document.createElement('div');
           stream.className = 'pour-stream';
           stream.style.setProperty('--stream-color', `var(--c-${color}, var(--accent))`);
           const liveDst = dst.getBoundingClientRect();
           const xStream = liveDst.left + liveDst.width / 2 - 3;
-          const yTop = liveDst.top - 26;
+          // Стрим стартует чуть выше горлышка приёмника, дотягиваясь до
+          // src-pivot'а (который теперь приподнят на verticalClearance).
+          const yTop = liveDst.top - Math.max(20, verticalClearance - 6);
           const yBot = liveDst.top + liveDst.height * 0.16;
           stream.style.left   = xStream + 'px';
           stream.style.top    = yTop + 'px';
@@ -1683,9 +1747,8 @@ window.Render = (() => {
           stream.style.width  = '6px';
           document.body.appendChild(stream);
 
-          // Шаг 4: стрим завершается → теперь пересобираем src/dst в
-          // post-move. Source теряет верхние пере-литые слои, в dst
-          // появляются новые с .is-new.
+          // Конец стрима → пересборка src/dst (новые слои в dst, верхние
+          // удалены у src). Запускается фаза D.
           setTimeout(() => {
             const s = State.get();
             const keepTransform   = src.style.transform;
@@ -1707,11 +1770,12 @@ window.Render = (() => {
 
             stream.remove();
 
-            // Шаг 5: возврат — сначала наклон → 0, затем translate → 0
-            src.style.transition = 'transform .18s ease';
-            src.style.transform  = `translate(${flyDx}px, ${flyDy}px)`;
+            // Фаза D: un-rotate + откатываемся к 80%-точке одновременно.
+            src.style.transition = 'transform .18s cubic-bezier(.3,0,.3,1)';
+            src.style.transform  = `translate(${txMid}px, ${tyMid}px)`;
             setTimeout(() => {
-              src.style.transition = 'transform .3s cubic-bezier(.4,0,.25,1)';
+              // Фаза E: от 80% → к 0% без вращения.
+              src.style.transition = 'transform .26s cubic-bezier(.4,0,.25,1)';
               src.style.transform  = '';
               setTimeout(() => {
                 src.classList.remove('pouring');
@@ -1719,11 +1783,11 @@ window.Render = (() => {
                 src.style.transition = '';
                 src.style.transformOrigin = '';
                 resolve();
-              }, 320);
-            }, 200);
+              }, 260);
+            }, 180);
           }, 360);
-        }, 120);
-      }, 320);
+        }, 180);
+      }, 260);
     });
   }
 
