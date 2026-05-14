@@ -63,8 +63,8 @@ body{
 
 /* ===== HEADER ===== */
 .header{
-  display:flex;align-items:center;justify-content:space-between;
-  padding:14px 16px 8px;
+  display:flex;align-items:center;justify-content:flex-end;
+  padding:14px 16px 4px;
   flex:0 0 auto;
 }
 .level-badge{
@@ -88,45 +88,35 @@ body{
   text-align:center;
 }
 .moves-pill b{color:var(--text);font-weight:400}
-.btn-dev{
-  background:transparent;
-  border:1px solid rgba(255,255,255,.18);
-  border-radius:12px;
-  width:38px;height:38px;
-  color:var(--text-dim);
-  cursor:pointer;
-  font-size:18px;
-  display:inline-flex;align-items:center;justify-content:center;
-  transition:background .15s, color .15s, border-color .15s;
-}
-.btn-dev:hover{color:var(--text);background:rgba(255,255,255,.06);border-color:rgba(255,255,255,.3)}
-.btn-dev:active{transform:translateY(1px)}
 
 /* ===== LEVEL TITLE (большие буквы по середине + сложность) ===== */
 .level-title{
   flex:0 0 auto;
   display:flex;flex-direction:column;align-items:center;
-  padding:6px 16px 4px;
+  padding:8px 16px 6px;
   text-align:center;
 }
 .level-title .lt-name{
-  font-size:clamp(28px, 7vw, 44px);
+  font-size:clamp(40px, 10vw, 64px);
   font-weight:400;
-  letter-spacing:1.4px;
+  letter-spacing:1.6px;
   color:var(--text);
   text-transform:uppercase;
-  text-shadow:0 4px 16px rgba(0,0,0,.45), 0 0 24px rgba(255,216,107,.18);
+  text-shadow:0 4px 18px rgba(0,0,0,.5), 0 0 28px rgba(255,216,107,.2);
   line-height:1;
+  cursor:default;
+  user-select:none;
+  -webkit-user-select:none;
 }
 .level-title .lt-name b{color:var(--accent);font-weight:400}
 .level-title .lt-diff{
-  margin-top:4px;
-  font-size:13px;
-  color:var(--text-dim);
-  display:inline-flex;align-items:center;gap:6px;
-  letter-spacing:.5px;
+  margin-top:8px;
+  font-size:26px;
+  color:var(--diff-color, var(--text-dim));
+  letter-spacing:1px;
+  text-shadow:0 2px 10px rgba(0,0,0,.4);
+  transition:color .2s ease;
 }
-.level-title .lt-diff .stars{color:var(--accent);letter-spacing:1px}
 
 /* ===== PLAYFIELD ===== */
 .field{
@@ -530,12 +520,11 @@ body{
 <div id="app">
   <div class="header">
     <div class="moves-pill">Ходов: <b id="hud-moves">0</b></div>
-    <button class="btn-dev" id="btn-dev" aria-label="Дев-панель" title="Дев-панель (Ctrl+Shift+D)">⚙</button>
   </div>
 
   <div class="level-title">
-    <div class="lt-name">Уровень <b id="hud-level">1</b></div>
-    <div class="lt-diff" id="hud-diff"><span class="stars">★☆☆☆☆</span><span>очень просто</span></div>
+    <div class="lt-name" id="hud-level-tap">Уровень <b id="hud-level">1</b></div>
+    <div class="lt-diff" id="hud-diff">Очень просто</div>
   </div>
 
   <div class="field">
@@ -1576,12 +1565,13 @@ window.Render = (() => {
   const $undo     = document.getElementById('btn-undo');
 
   // Сложность от размера поля. 5 ступеней по sticks×capacity.
+  // Цвет градирует от зелёного (легко) к малиновому (сложно).
   const DIFF_TIERS = [
-    { max:  9, stars:'★☆☆☆☆', name:'очень просто' },
-    { max: 15, stars:'★★☆☆☆', name:'просто' },
-    { max: 22, stars:'★★★☆☆', name:'средне' },
-    { max: 35, stars:'★★★★☆', name:'сложно' },
-    { max: Infinity, stars:'★★★★★', name:'очень сложно' },
+    { max:  9,       name:'Очень просто',  color:'#7be37b' },
+    { max: 15,       name:'Просто',        color:'#c5e35b' },
+    { max: 22,       name:'Средне',        color:'#ffd23f' },
+    { max: 35,       name:'Сложно',        color:'#ff8a2b' },
+    { max: Infinity, name:'Очень сложно',  color:'#ef3a5d' },
   ];
   function getDifficulty(sticks, capacity) {
     const score = sticks * capacity;
@@ -1663,7 +1653,8 @@ window.Render = (() => {
     $hudMoves.textContent = s.moves;
     if ($hudDiff) {
       const d = getDifficulty(s.sticks.length, s.capacity);
-      $hudDiff.innerHTML = `<span class="stars">${d.stars}</span><span>${d.name}</span>`;
+      $hudDiff.textContent = d.name;
+      $hudDiff.style.setProperty('--diff-color', d.color);
     }
   }
 
@@ -2451,7 +2442,20 @@ window.App = (() => {
     document.getElementById('btn-undo').addEventListener('click', onUndo);
     document.getElementById('btn-restart').addEventListener('click', onRestart);
     document.getElementById('btn-next').addEventListener('click', onNext);
-    document.getElementById('btn-dev').addEventListener('click', () => DevPanel.toggle());
+
+    // 5-кратный тап по заголовку «Уровень N» открывает дев-панель.
+    // Кнопки шестерёнки больше нет — это скрытый вход для разработчика.
+    const lvlTap = document.getElementById('hud-level-tap');
+    let tapCount = 0, tapTimer = null;
+    if (lvlTap) lvlTap.addEventListener('click', () => {
+      tapCount++;
+      clearTimeout(tapTimer);
+      tapTimer = setTimeout(() => { tapCount = 0; }, 1500);
+      if (tapCount >= 5) {
+        tapCount = 0;
+        DevPanel.open();
+      }
+    });
   }
 
   async function onStickClick(idx) {
