@@ -1226,8 +1226,25 @@ window.State = (() => {
     }
     const src = state.selected;
     const moved = move(src, idx);
-    state.selected = null;
-    return moved > 0 ? 'moved' : 'invalid';
+    if (moved > 0) {
+      state.selected = null;
+      return 'moved';
+    }
+    // Перелив не получился (приёмник не подходит по цвету или заполнен).
+    // Трактуем как «передумал и выбираю другую колбу»: если новая колба
+    // годится для выбора — переключаем selection на неё; если это пустая
+    // или собранная — просто снимаем старое выделение.
+    const target = state.sticks[idx];
+    if (target.length === 0) {
+      state.selected = null;
+      return 'deselected';
+    }
+    if (isCompletedStack(target, state.capacity)) {
+      state.selected = null;
+      return 'locked';
+    }
+    state.selected = idx;
+    return 'switched';
   }
 
   function isWon() {
