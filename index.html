@@ -63,14 +63,13 @@ body{
 
 /* (header убран — счётчик ходов скрыт) */
 
-/* ===== LEVEL TITLE — центрирован между верхом экрана и верхом колб.
-   Растягивается через flex:1 0 auto и центрирует текст по вертикали. */
+/* ===== LEVEL TITLE — компактный блок над полем (колбы остаются по центру field). */
 .level-title{
-  flex:1 0 auto;
-  display:flex;flex-direction:column;align-items:center;justify-content:center;
-  padding:clamp(16px, 4vh, 40px) 16px;
+  flex:0 0 auto;
+  display:flex;flex-direction:column;align-items:center;
+  padding:clamp(12px, 3vh, 28px) 16px 4px;
   text-align:center;
-  gap:10px;
+  gap:8px;
 }
 .level-title .lt-name{
   font-size:clamp(40px, 10vw, 64px);
@@ -106,11 +105,11 @@ body{
 
 /* ===== PLAYFIELD ===== */
 .field{
-  flex:0 0 auto;
+  flex:1 1 auto;
   display:flex;
   align-items:center;
   justify-content:center;
-  padding:8px 8px 16px;
+  padding:8px;
   position:relative;
   overflow:hidden;
 }
