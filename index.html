@@ -1675,22 +1675,22 @@ window.Render = (() => {
    * Источник подлетает ГОРЛЫШКОМ к горлышку приёмника и наклоняется
    * относительно своего горлышка (pivot = верхняя точка колбы).
    *
-   * Шаги (≈1.24s total):
-   *   A. translate на 80% дистанции БЕЗ вращения (260ms). Колба ещё в
-   *      стороне от приёмника, силуэты не перекрываются.
-   *   B. finishing 20% translate + rotate ~70° ОДНОВРЕМЕННО (180ms).
-   *      Пока колба «доезжает», она уже наклоняется — её тело уходит
-   *      в сторону, поэтому в финальной позиции колбы не сливаются
-   *      в один силуэт.
-   *   C. появляется струйка между горлышками + bump приёмника, держим
-   *      позу (≈360ms). После стрима пересобираем src/dst в post-move.
-   *   D. un-rotate + back to 80% translate ОДНОВРЕМЕННО (180ms) — обратная
-   *      симметрия фазе B: колба выпрямляется И отъезжает от приёмника.
-   *   E. translate с 80% → 0%, без вращения (260ms).
+   * Шаги (≈1.13s total):
+   *   A. translate + rotate ОДНОВРЕМЕННО от 0% к 100% (≈400ms).
+   *      Колба с первого кадра идёт по дуге: одновременно едет и
+   *      кренится. К концу фазы — в полной позе у приёмника,
+   *      наклонена на 70°. Силуэты не сливаются в один — пока src
+   *      доезжает, его тело уже отклоняется в сторону.
+   *   B. появляется струйка между горлышками + bump приёмника,
+   *      позу держим (≈360ms). По окончании стрима пересобираем
+   *      src/dst в post-move.
+   *   C. translate + un-rotate ОДНОВРЕМЕННО от 100% к 0% (≈400ms).
+   *      Зеркальный возврат: колба выпрямляется и отъезжает за один
+   *      слитный жест.
    *
    * Дополнительный вертикальный зазор (verticalClearance) приподнимает
    * горлышко источника так, чтобы во время наклона его дно не касалось
-   * корпуса приёмника. Зависит от высоты колбы (увеличен пропорционально).
+   * корпуса приёмника. Зависит от высоты колбы (пропорционально).
    */
   function animatePour(srcIdx, dstIdx, color) {
     return new Promise(resolve => {
@@ -1713,81 +1713,70 @@ window.Render = (() => {
       const flyDx = dstNeckX - srcNeckX;
       const flyDy = (dstNeckY - srcNeckY) - verticalClearance;
       const tiltDir = (dstNeckX >= srcNeckX) ? 70 : -70;
-      // Промежуточная точка — 80% пути; в ней начинается вращение.
-      const txMid = flyDx * 0.8;
-      const tyMid = flyDy * 0.8;
+
+      const FORWARD_MS = 400; // подлёт + наклон в один жест
+      const RETURN_MS  = 400; // зеркальный возврат
 
       src.classList.add('pouring');
       src.style.transformOrigin = '50% 4%';
 
-      // Фаза A: подлёт на 80% без вращения.
-      src.style.transition = 'transform .26s cubic-bezier(.3,0,.3,1)';
-      src.style.transform  = `translate(${txMid}px, ${tyMid}px)`;
+      // Фаза A: translate + rotate ОДНОВРЕМЕННО с самого старта.
+      src.style.transition = `transform ${FORWARD_MS}ms cubic-bezier(.3,0,.3,1)`;
+      src.style.transform  = `translate(${flyDx}px, ${flyDy}px) rotate(${tiltDir}deg)`;
 
       setTimeout(() => {
-        // Фаза B: доезжаем оставшиеся 20% + одновременно крутимся в наклон.
-        src.style.transition = 'transform .18s cubic-bezier(.4,0,.3,1)';
-        src.style.transform  = `translate(${flyDx}px, ${flyDy}px) rotate(${tiltDir}deg)`;
+        // Фаза B: стрим + bump. Позу держим, source/dst пока pre-move.
+        dst.classList.add('receiving-bump');
+        const stream = document.createElement('div');
+        stream.className = 'pour-stream';
+        stream.style.setProperty('--stream-color', `var(--c-${color}, var(--accent))`);
+        const liveDst = dst.getBoundingClientRect();
+        const xStream = liveDst.left + liveDst.width / 2 - 3;
+        // Стрим стартует чуть выше горлышка приёмника, дотягиваясь до
+        // src-pivot'а (который теперь приподнят на verticalClearance).
+        const yTop = liveDst.top - Math.max(20, verticalClearance - 6);
+        const yBot = liveDst.top + liveDst.height * 0.16;
+        stream.style.left   = xStream + 'px';
+        stream.style.top    = yTop + 'px';
+        stream.style.height = (yBot - yTop) + 'px';
+        stream.style.width  = '6px';
+        document.body.appendChild(stream);
 
+        // Конец стрима → пересборка src/dst (новые слои в dst, верхние
+        // удалены у src). Запускается фаза C (возврат).
         setTimeout(() => {
-          // Фаза C: стрим. Source/dst пока pre-move (со всеми слоями).
-          dst.classList.add('receiving-bump');
-          const stream = document.createElement('div');
-          stream.className = 'pour-stream';
-          stream.style.setProperty('--stream-color', `var(--c-${color}, var(--accent))`);
-          const liveDst = dst.getBoundingClientRect();
-          const xStream = liveDst.left + liveDst.width / 2 - 3;
-          // Стрим стартует чуть выше горлышка приёмника, дотягиваясь до
-          // src-pivot'а (который теперь приподнят на verticalClearance).
-          const yTop = liveDst.top - Math.max(20, verticalClearance - 6);
-          const yBot = liveDst.top + liveDst.height * 0.16;
-          stream.style.left   = xStream + 'px';
-          stream.style.top    = yTop + 'px';
-          stream.style.height = (yBot - yTop) + 'px';
-          stream.style.width  = '6px';
-          document.body.appendChild(stream);
+          const s = State.get();
+          const keepTransform   = src.style.transform;
+          const keepTransition  = src.style.transition;
+          const keepOrigin      = src.style.transformOrigin;
+          const newSrc = buildBottle(s.sticks[srcIdx], srcIdx, s.capacity);
+          newSrc.classList.add('pouring');
+          newSrc.style.transform       = keepTransform;
+          newSrc.style.transition      = keepTransition;
+          newSrc.style.transformOrigin = keepOrigin;
+          src.replaceWith(newSrc);
+          src = newSrc;
 
-          // Конец стрима → пересборка src/dst (новые слои в dst, верхние
-          // удалены у src). Запускается фаза D.
+          const newDst = buildBottle(s.sticks[dstIdx], dstIdx, s.capacity);
+          newDst.classList.add('receiving-bump');
+          dst.replaceWith(newDst);
+          dst = newDst;
+          if (s.lastAdded) s.lastAdded = null;
+
+          stream.remove();
+
+          // Фаза C: возврат translate + un-rotate ОДНОВРЕМЕННО.
+          src.style.transition = `transform ${RETURN_MS}ms cubic-bezier(.4,0,.25,1)`;
+          src.style.transform  = '';
           setTimeout(() => {
-            const s = State.get();
-            const keepTransform   = src.style.transform;
-            const keepTransition  = src.style.transition;
-            const keepOrigin      = src.style.transformOrigin;
-            const newSrc = buildBottle(s.sticks[srcIdx], srcIdx, s.capacity);
-            newSrc.classList.add('pouring');
-            newSrc.style.transform       = keepTransform;
-            newSrc.style.transition      = keepTransition;
-            newSrc.style.transformOrigin = keepOrigin;
-            src.replaceWith(newSrc);
-            src = newSrc;
-
-            const newDst = buildBottle(s.sticks[dstIdx], dstIdx, s.capacity);
-            newDst.classList.add('receiving-bump');
-            dst.replaceWith(newDst);
-            dst = newDst;
-            if (s.lastAdded) s.lastAdded = null;
-
-            stream.remove();
-
-            // Фаза D: un-rotate + откатываемся к 80%-точке одновременно.
-            src.style.transition = 'transform .18s cubic-bezier(.3,0,.3,1)';
-            src.style.transform  = `translate(${txMid}px, ${tyMid}px)`;
-            setTimeout(() => {
-              // Фаза E: от 80% → к 0% без вращения.
-              src.style.transition = 'transform .26s cubic-bezier(.4,0,.25,1)';
-              src.style.transform  = '';
-              setTimeout(() => {
-                src.classList.remove('pouring');
-                dst.classList.remove('receiving-bump');
-                src.style.transition = '';
-                src.style.transformOrigin = '';
-                resolve();
-              }, 260);
-            }, 180);
-          }, 360);
-        }, 180);
-      }, 260);
+            src.classList.remove('pouring');
+            dst.classList.remove('receiving-bump');
+            src.style.transition = '';
+            src.style.transformOrigin = '';
+            resolve();
+          }, RETURN_MS);
+        }, 360);
+      }, FORWARD_MS);
     });
   }
 
