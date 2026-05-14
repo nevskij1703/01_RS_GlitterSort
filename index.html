@@ -109,7 +109,8 @@ body{
 }
 .sticks{
   display:grid;
-  gap:clamp(8px,2.5vw,18px);
+  /* Просторный шаг между колбами — раньше было clamp(8,2.5vw,18). */
+  gap:clamp(16px,4.5vw,30px);
   width:100%;
   max-width:560px;
   align-items:end;
@@ -142,10 +143,12 @@ body{
      Контур (outline path) использует currentColor — меняем цвет состояния
      через CSS color: вместо filter-обводки.
      --bottle-max — пиксельный лимит ширины, считается JS-ом в Render.fitBottles()
-     с учётом числа колб (для 12 шт. колбы ужимаются, чтобы 3 ряда влезли). */
+     с учётом числа колб (для 12 шт. колбы ужимаются, чтобы 3 ряда влезли).
+     Базовый максимум 52px (1.5× меньше прежних 78px) — после правки
+     пользователя «уменьш на всех экранах размер колбочек в 1,5 раза». */
   position:relative;
   width:100%;
-  max-width:var(--bottle-max, 78px);
+  max-width:var(--bottle-max, 52px);
   aspect-ratio:1051 / 3484.75;
   cursor:pointer;
   color:#ffffff;
@@ -408,7 +411,8 @@ body{
   .level-badge{font-size:16px;padding:6px 14px}
   .moves-pill{font-size:13px;padding:6px 12px}
   .btn{min-width:56px;height:50px;padding:0 12px;font-size:13px}
-  .sticks{gap:8px}
+  /* Шаг между колбами не зажимаем — общее правило .sticks (gap:clamp(16,…,30))
+     отрабатывает само. */
 }
 @media (max-height:640px){
   .header{padding:8px 16px 4px}
@@ -1528,7 +1532,9 @@ window.Render = (() => {
     const maxByWidth  = (contentW - (cols - 1) * gap) / cols;
     const maxByHeight = ((contentH - (rows - 1) * gap) / rows) * BOTTLE_ASPECT_W_OVER_H;
 
-    const bottleMax = Math.max(40, Math.floor(Math.min(78, maxByWidth, maxByHeight)));
+    // Базовый кап — 52px (=78/1.5), по требованию пользователя уменьшить колбы
+    // на всех экранах в 1.5×. Минимум — 32px, ниже становится нечитаемо.
+    const bottleMax = Math.max(32, Math.floor(Math.min(52, maxByWidth, maxByHeight)));
     document.documentElement.style.setProperty('--bottle-max', bottleMax + 'px');
   }
   // Реагируем на ресайз окна (поворот экрана, devtools и т.п.).
