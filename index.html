@@ -162,50 +162,84 @@ body{
 .sticks[data-count="13"]{grid-template-columns:repeat(5,1fr)}
 
 /* ===== BOTTLE =====
-   Силуэт лабораторной колбы:
-     - тонкое стеклянное горлышко сверху (через ::before)
-     - округлый корпус с лёгкой стеклянной заливкой
-     - вертикальный блик слева (через ::after)
-     - слои закрашивают только нижнюю часть корпуса, остаётся
-       видимый зазор сверху над верхним слоем
+   Силуэт лабораторной колбы — ЕДИНАЯ форма (горлышко + плечики + корпус +
+   округлое дно), задаётся SVG-маской на .bottle. Никаких «накладок» сверху.
+   Жидкость, блик и пробка — children внутри маскированного контейнера.
+   Контур имитируется через несколько drop-shadow'ов (mask нельзя сочетать
+   с обычным border).
 */
 .bottle{
+  --flask-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 80 192' preserveAspectRatio='none'><path d='M22 0 L58 0 L58 18 C58 22 76 26 80 34 L80 164 C80 180 70 192 40 192 C10 192 0 180 0 164 L0 34 C4 26 22 22 22 18 Z' fill='black'/></svg>");
   position:relative;
   width:100%;
-  max-width:70px;
-  aspect-ratio:1 / 2.7;
+  max-width:78px;
+  aspect-ratio:80 / 192;
   cursor:pointer;
-  margin-top:22px;                       /* место для торчащего вверх горлышка */
   background:linear-gradient(180deg, rgba(255,255,255,.10), rgba(255,255,255,.04));
-  border:2px solid rgba(255,255,255,.45);
-  /* Сверху небольшое скругление под горлышко, плечики ярко выражены;
-     снизу — глубокое округление, как у пробирки. */
-  border-radius:10px 10px 40px 40px / 10px 10px 56px 56px;
-  transition:transform .22s cubic-bezier(.4,0,.25,1);
-  box-shadow:
-    inset 7px 0 8px -5px rgba(255,255,255,.55),
-    inset -6px 0 7px -4px rgba(0,0,0,.32),
-    inset 0 -10px 18px -8px rgba(0,0,0,.38),
-    0 6px 14px rgba(0,0,0,.35);
+  -webkit-mask:var(--flask-mask) center / 100% 100% no-repeat;
+          mask:var(--flask-mask) center / 100% 100% no-repeat;
+  transition:transform .22s cubic-bezier(.4,0,.25,1), filter .15s;
+  /* Контур + тень через стек drop-shadow'ов (mask отключает border). */
+  filter:
+    drop-shadow( 1px  0  0 rgba(255,255,255,.55))
+    drop-shadow(-1px  0  0 rgba(255,255,255,.55))
+    drop-shadow( 0  1px  0 rgba(255,255,255,.55))
+    drop-shadow( 0 -1px  0 rgba(255,255,255,.55))
+    drop-shadow(0 6px 12px rgba(0,0,0,.42));
 }
-/* Горлышко колбы — узкое стеклянное горло, торчит вверх над корпусом */
-.bottle::before{
-  content:'';position:absolute;left:50%;top:-20px;transform:translateX(-50%);
-  width:45%;height:24px;
-  background:linear-gradient(180deg, rgba(255,255,255,.20), rgba(255,255,255,.06));
-  border:2px solid rgba(255,255,255,.45);
-  border-bottom:none;
-  border-radius:7px 7px 2px 2px;
-  box-shadow:
-    inset 3px 0 3px -2px rgba(255,255,255,.5),
-    inset -3px 0 3px -2px rgba(0,0,0,.2);
-  pointer-events:none;
-  z-index:3;
+.bottle.selected{
+  transform:translateY(-16px);
+  filter:
+    drop-shadow( 1.5px  0  0 var(--accent))
+    drop-shadow(-1.5px  0  0 var(--accent))
+    drop-shadow( 0  1.5px  0 var(--accent))
+    drop-shadow( 0 -1.5px  0 var(--accent))
+    drop-shadow(0 10px 16px rgba(255,216,107,.35));
 }
-/* Вертикальный стеклянный блик слева */
-.bottle::after{
-  content:'';position:absolute;left:14%;top:8%;
-  width:8%;height:70%;
+.bottle.completed{
+  filter:
+    drop-shadow( 1.5px  0  0 var(--ok))
+    drop-shadow(-1.5px  0  0 var(--ok))
+    drop-shadow( 0  1.5px  0 var(--ok))
+    drop-shadow( 0 -1.5px  0 var(--ok))
+    drop-shadow(0 6px 12px rgba(0,0,0,.42));
+}
+
+/* Контейнер слоёв — прижат к низу корпуса колбы (после плечиков ≈ 18%
+   высоты mask'а). Сама форма уже обрезана mask'ом, layers могут идти на
+   всю ширину — края подрежет mask автоматически. */
+.bottle .layers{
+  position:absolute;
+  left:0;right:0;bottom:0;
+  top:18%;
+  display:flex;
+  flex-direction:column-reverse;
+  overflow:hidden;
+  z-index:1;
+}
+.bottle .layer{
+  width:100%;
+  background:var(--layer-color, #888);
+  flex:0 0 auto;
+  height:calc(100% / var(--cap, 4));
+  transition:background .15s ease;
+}
+
+/* Анимация наполнения нового слоя — растёт сверху вниз. */
+.bottle .layer.is-new{
+  transform-origin:top center;
+  animation:layerFill .4s cubic-bezier(.3,0,.3,1) both;
+}
+@keyframes layerFill{
+  0%{transform:scaleY(0);opacity:.4}
+  100%{transform:scaleY(1);opacity:1}
+}
+
+/* Внутренний блик колбы — узкая вертикальная полоса с левой стороны. */
+.bottle .gloss{
+  position:absolute;
+  left:12%;top:22%;
+  width:7%;height:62%;
   background:linear-gradient(180deg,
     rgba(255,255,255,.55) 0%,
     rgba(255,255,255,.15) 55%,
@@ -213,43 +247,28 @@ body{
   border-radius:50% / 100%;
   filter:blur(.4px);
   pointer-events:none;
-  z-index:4;
+  z-index:3;
 }
-.bottle.selected{
-  transform:translateY(-16px);
-  border-color:var(--accent);
-  box-shadow:
-    inset 6px 0 6px -4px rgba(255,255,255,.5),
-    inset -5px 0 5px -3px rgba(0,0,0,.3),
-    0 10px 18px rgba(255,216,107,.35),
-    0 0 0 2px rgba(255,216,107,.6);
-}
-.bottle.completed{
-  border-color:var(--ok);
-  box-shadow:
-    inset 6px 0 6px -4px rgba(255,255,255,.5),
-    inset -5px 0 5px -3px rgba(0,0,0,.3),
-    0 6px 14px rgba(0,0,0,.35),
-    0 0 0 2px rgba(123,227,123,.5);
-}
-/* Контейнер слоёв — прижат к низу, занимает только часть высоты корпуса
-   так что над верхним слоем остаётся видимый стеклянный зазор. */
-.bottle .layers{
+
+/* Деревянная пробка — отдельный child, заполняет верхнюю узкую часть mask
+   (от 0% до ~16% высоты). Mask автоматически обрезает её под форму neck. */
+.bottle .cork{
   position:absolute;
-  left:0;right:0;bottom:0;
-  height:84%;
-  display:flex;
-  flex-direction:column-reverse;
-  border-radius:0 0 30px 30px / 0 0 40px 40px;
-  overflow:hidden;
-  z-index:1;
+  left:0;right:0;top:0;
+  height:16%;
+  background:linear-gradient(180deg, #e3b97e 0%, #c08d4b 55%, #8a5a26 100%);
+  box-shadow:
+    inset 3px 0 3px -1px rgba(255,230,180,.5),
+    inset -3px 0 3px -1px rgba(0,0,0,.35),
+    inset 0 -3px 4px rgba(0,0,0,.28);
+  z-index:4;
+  pointer-events:none;
+  animation:corkPop .3s cubic-bezier(.3,0,.3,1) both;
 }
-.bottle .layer{
-  width:100%;
-  background:var(--layer-color, #888);
-  transition:height .25s ease, background .15s ease;
-  flex:0 0 auto;
-  height:calc(100% / var(--cap, 4));
+@keyframes corkPop{
+  0%{transform:translateY(-6px) scale(.85);opacity:0}
+  60%{transform:translateY(2px) scale(1.05);opacity:1}
+  100%{transform:translateY(0) scale(1);opacity:1}
 }
 .bottle .layer.c-pink   {background:var(--c-pink)}
 .bottle .layer.c-orange {background:var(--c-orange)}
@@ -261,34 +280,17 @@ body{
 .bottle .layer.c-crimson{background:var(--c-crimson)}
 .bottle .layer.c-cyan   {background:var(--c-cyan)}
 
-/* ===== ПРОБКА для собранной (completed) колбы =====
-   Замещает прозрачное горлышко на «деревянную пробку». */
-.bottle.completed::before{
-  background:linear-gradient(180deg,#e3b97e 0%,#c08d4b 55%,#8a5a26 100%);
-  border-color:#5a3812;
-  box-shadow:
-    inset 3px 0 3px -1px rgba(255,230,180,.5),
-    inset -3px 0 3px -1px rgba(0,0,0,.35),
-    0 -2px 4px rgba(0,0,0,.3);
-  top:-14px;height:18px;
-  border-radius:5px 5px 2px 2px;
-}
-.bottle.completed::after{opacity:.25} /* блик слабее на «деревянной» крышке */
-
 /* ===== «+» bottle — полупрозрачная колба для активации бонуса ===== */
 .bottle.bottle-add{
-  background:rgba(255,255,255,.04);
-  border-style:dashed;
-  border-color:rgba(255,216,107,.55);
-  position:relative;
+  background:rgba(255,216,107,.06);
+  filter:
+    drop-shadow( 1px  0  0 rgba(255,216,107,.45))
+    drop-shadow(-1px  0  0 rgba(255,216,107,.45))
+    drop-shadow( 0  1px  0 rgba(255,216,107,.45))
+    drop-shadow( 0 -1px  0 rgba(255,216,107,.45));
 }
-.bottle.bottle-add::before{
-  /* у бонусной колбы тоже есть горлышко, но мягче */
-  background:rgba(255,255,255,.06);
-  border-color:rgba(255,216,107,.45);
-  border-style:dashed;
-}
-.bottle.bottle-add::after{display:none} /* без блика */
+.bottle.bottle-add .gloss{display:none}
+.bottle.bottle-add:hover{background:rgba(255,216,107,.12)}
 .bottle.bottle-add .add-plus{
   position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
   width:36px;height:36px;border-radius:50%;
@@ -306,27 +308,12 @@ body{
   50%{transform:translate(-50%,-50%) scale(1.12)}
 }
 
-/* ===== Анимация переливания =====
-   Источник «наклоняется» к приёмнику когда переливает. */
-.bottle.pouring-left{
-  animation:pourLeft .35s cubic-bezier(.4,0,.25,1);
-  transform-origin:50% 100%;
+/* ===== Анимация переливания — управляется JS (Render.animatePour) =====
+   Колба-источник перелетает к приёмнику, наклоняется, появляется струйка,
+   приёмник чуть подскакивает, источник возвращается. */
+.bottle.pouring{
   z-index:6;
-}
-.bottle.pouring-right{
-  animation:pourRight .35s cubic-bezier(.4,0,.25,1);
-  transform-origin:50% 100%;
-  z-index:6;
-}
-@keyframes pourLeft{
-  0%{transform:translateY(-16px) rotate(0)}
-  40%{transform:translateY(-22px) rotate(-14deg)}
-  100%{transform:translateY(-16px) rotate(0)}
-}
-@keyframes pourRight{
-  0%{transform:translateY(-16px) rotate(0)}
-  40%{transform:translateY(-22px) rotate(14deg)}
-  100%{transform:translateY(-16px) rotate(0)}
+  transform-origin:50% 95%;
 }
 .bottle.receiving-bump{animation:receiveBump .25s ease}
 @keyframes receiveBump{
@@ -337,19 +324,20 @@ body{
 /* Струйка жидкости при переливании (создаётся JS-ом). */
 .pour-stream{
   position:fixed;
-  width:6px;
+  width:7px;
   background:var(--stream-color, var(--accent));
-  border-radius:3px;
+  border-radius:4px;
   pointer-events:none;
   z-index:10;
-  box-shadow:0 0 8px var(--stream-color, var(--accent));
-  opacity:.9;
-  animation:streamFade .35s ease forwards;
+  box-shadow:0 0 10px var(--stream-color, var(--accent));
+  transform-origin:top center;
+  animation:streamPulse .55s ease-out forwards;
 }
-@keyframes streamFade{
-  0%{opacity:0;transform:scaleY(0)}
-  30%{opacity:.95;transform:scaleY(1)}
-  100%{opacity:0;transform:scaleY(.6)}
+@keyframes streamPulse{
+  0%{transform:scaleY(0);opacity:0}
+  20%{transform:scaleY(1);opacity:.95}
+  85%{transform:scaleY(1);opacity:.95}
+  100%{transform:scaleY(.5);opacity:0}
 }
 
 /* ===== ТУТОРИАЛЬНАЯ РУКА ===== */
@@ -1269,6 +1257,9 @@ window.State = (() => {
     for (let i = 0; i < k; i++) b.push(a.pop());
     state.moves++;
     state.history.push({ src, dst, count: k, color: top });
+    // Маркер «последний add» — Render использует его, чтобы навесить
+    // .is-new на свежие layers и анимировать наполнение.
+    state.lastAdded = { idx: dst, count: k, color: top };
     return k;
   }
 
@@ -1495,6 +1486,11 @@ window.Ads = (() => {
         }
       };
       console.log('[Ads] backend=native (YandexAds bridge)');
+      // Preload первой пары реклам, чтобы первый показ был мгновенным.
+      try {
+        window.YandexAds.preloadInterstitial(UNIT_INTERSTITIAL);
+        window.YandexAds.preloadRewarded(UNIT_REWARDED);
+      } catch (e) { console.warn('[Ads] preload skipped:', e); }
       return Promise.resolve();
     }
     if (window.YaGames && typeof window.YaGames.init === 'function') {
@@ -1595,36 +1591,58 @@ window.Render = (() => {
   function renderAll() {
     const s = State.get();
     if (!s) return;
-    // К полю добавляем виртуальную «+» колбу, если бонус ещё не активирован.
     const showAdd = !s.bonusUsedThisLevel && s.sticks.length < 13;
     const totalCount = s.sticks.length + (showAdd ? 1 : 0);
     $sticks.dataset.count = String(totalCount);
     $sticks.innerHTML = '';
     s.sticks.forEach((stack, idx) => $sticks.appendChild(buildBottle(stack, idx, s.capacity)));
     if (showAdd) $sticks.appendChild(buildAddBottle(s.capacity));
+    // Метку «новые слои» сбрасываем после рендера — иначе следующий renderAll
+    // без хода пере-играл бы анимацию заполнения.
+    if (s.lastAdded) s.lastAdded = null;
     renderHud();
     renderActionButtons();
   }
 
   function buildBottle(stack, idx, capacity) {
+    const s = State.get();
     const el = document.createElement('div');
     el.className = 'bottle';
     el.dataset.idx = String(idx);
     el.style.setProperty('--cap', capacity);
-    if (State.get().selected === idx) el.classList.add('selected');
-    if (State.isCompletedStack(stack, capacity)) el.classList.add('completed');
+    if (s.selected === idx) el.classList.add('selected');
+    const completed = State.isCompletedStack(stack, capacity);
+    if (completed) el.classList.add('completed');
+
+    // Слои (от низа вверх через column-reverse)
     const layers = document.createElement('div');
     layers.className = 'layers';
-    for (const color of stack) {
+    const lastAdded = s.lastAdded;
+    const newCount = (lastAdded && lastAdded.idx === idx) ? lastAdded.count : 0;
+    stack.forEach((color, i) => {
       const layer = document.createElement('div');
       layer.className = 'layer c-' + color;
+      // Помечаем последние newCount layer'ов как новые (для анимации наполнения)
+      if (i >= stack.length - newCount) layer.classList.add('is-new');
       layers.appendChild(layer);
-    }
+    });
     el.appendChild(layers);
+
+    // Стеклянный блик слева
+    const gloss = document.createElement('div');
+    gloss.className = 'gloss';
+    el.appendChild(gloss);
+
+    // Деревянная пробка для собранной колбы (mask автоматически
+    // подрежет её под форму горлышка).
+    if (completed) {
+      const cork = document.createElement('div');
+      cork.className = 'cork';
+      el.appendChild(cork);
+    }
     return el;
   }
 
-  // Полупрозрачная «+» колба для активации бонуса за рекламу.
   function buildAddBottle(capacity) {
     const el = document.createElement('div');
     el.className = 'bottle bottle-add';
@@ -1656,38 +1674,71 @@ window.Render = (() => {
   }
 
   /**
-   * Анимация переливания между двумя колбами. Источник наклоняется в
-   * сторону приёмника, приёмник немного подпрыгивает, между горлышками
-   * рисуется тонкая струйка цвета жидкости. Затем renderAll() обновит
-   * раскладку (state уже изменён до вызова).
+   * Многошаговая анимация переливания.
+   *   1. источник подлетает к приёмнику (translate; ~280ms)
+   *   2. наклоняется горлышком к приёмнику (rotate ~32°; ~200ms)
+   *   3. появляется цветная струйка между горлышками (~400ms)
+   *      параллельно приёмник подскакивает (.receiving-bump)
+   *   4. источник возвращается на исходную позицию (~300ms)
+   * Возвращает Promise, который резолвится по окончании (≈1.1s).
+   * Новые layer'ы в приёмнике анимируются отдельно через CSS .is-new
+   * (заполнение сверху-вниз), запускается renderAll'ом.
    */
   function animatePour(srcIdx, dstIdx, color) {
-    const src = $sticks.children[srcIdx];
-    const dst = $sticks.children[dstIdx];
-    if (!src || !dst) return;
-    const srcRect = src.getBoundingClientRect();
-    const dstRect = dst.getBoundingClientRect();
-    const srcCx = srcRect.left + srcRect.width / 2;
-    const dstCx = dstRect.left + dstRect.width / 2;
-    const direction = dstCx > srcCx ? 'right' : 'left';
-    src.classList.add(direction === 'right' ? 'pouring-right' : 'pouring-left');
-    dst.classList.add('receiving-bump');
-    // Струйка между горлышками
-    const stream = document.createElement('div');
-    stream.className = 'pour-stream';
-    stream.style.setProperty('--stream-color', `var(--c-${color}, var(--accent))`);
-    const x = (srcCx + dstCx) / 2;
-    const yTop = Math.min(srcRect.top, dstRect.top) - 18;
-    const yBot = Math.min(srcRect.top, dstRect.top) + 20;
-    stream.style.left = (x - 3) + 'px';
-    stream.style.top  = yTop + 'px';
-    stream.style.height = (yBot - yTop) + 'px';
-    document.body.appendChild(stream);
-    setTimeout(() => {
-      src.classList.remove('pouring-right', 'pouring-left');
-      dst.classList.remove('receiving-bump');
-      stream.remove();
-    }, 360);
+    return new Promise(resolve => {
+      const src = $sticks.children[srcIdx];
+      const dst = $sticks.children[dstIdx];
+      if (!src || !dst) { resolve(); return; }
+
+      const srcRect = src.getBoundingClientRect();
+      const dstRect = dst.getBoundingClientRect();
+      const dx = (dstRect.left + dstRect.width / 2) - (srcRect.left + srcRect.width / 2);
+      // подлёт: смещение по X почти к dst, но не до конца (чтобы горлышко
+      // зависло над приёмником, а не накрыло его)
+      const flyDx = dx + (dx > 0 ? -srcRect.width * 0.55 : srcRect.width * 0.55);
+      const flyDy = (dstRect.top - srcRect.top) - 6;
+      const tiltDir = dx > 0 ? -32 : 32;
+
+      src.classList.add('pouring');
+      // Шаг 1: подлёт (без поворота)
+      src.style.transition = 'transform .28s cubic-bezier(.3,0,.3,1)';
+      src.style.transform = `translate(${flyDx}px, ${flyDy}px)`;
+
+      // Шаг 2: наклон (через 280мс, добавляется к translate)
+      setTimeout(() => {
+        src.style.transition = 'transform .2s ease';
+        src.style.transform  = `translate(${flyDx}px, ${flyDy}px) rotate(${tiltDir}deg)`;
+
+        // Шаг 3 (после наклона ~120мс): струйка + bump приёмника
+        setTimeout(() => {
+          dst.classList.add('receiving-bump');
+          const stream = document.createElement('div');
+          stream.className = 'pour-stream';
+          stream.style.setProperty('--stream-color', `var(--c-${color}, var(--accent))`);
+          const liveDst = dst.getBoundingClientRect();
+          const xStream = liveDst.left + liveDst.width / 2 - 3.5;
+          const yTop = liveDst.top - 24;
+          const yBot = liveDst.top + liveDst.height * 0.35;
+          stream.style.left = xStream + 'px';
+          stream.style.top  = yTop + 'px';
+          stream.style.height = (yBot - yTop) + 'px';
+          document.body.appendChild(stream);
+
+          // Шаг 4: возврат источника (через ~280мс после старта потока)
+          setTimeout(() => {
+            src.style.transition = 'transform .3s cubic-bezier(.4,0,.25,1)';
+            src.style.transform  = '';
+            setTimeout(() => {
+              src.classList.remove('pouring');
+              dst.classList.remove('receiving-bump');
+              src.style.transition = '';
+              stream.remove();
+              resolve();
+            }, 320);
+          }, 280);
+        }, 120);
+      }, 280);
+    });
   }
 
   function showWin(text) {
@@ -2403,9 +2454,8 @@ window.App = (() => {
     document.getElementById('btn-dev').addEventListener('click', () => DevPanel.toggle());
   }
 
-  function onStickClick(idx) {
+  async function onStickClick(idx) {
     if (transferLocked) return;
-    // Перед изменением state — снимок верхнего цвета и selected (для анимации).
     const prev = State.get();
     const prevSelected = prev ? prev.selected : null;
     const prevTopColor = prev && prevSelected !== null && prev.sticks[prevSelected].length
@@ -2414,13 +2464,14 @@ window.App = (() => {
     const result = State.clickStick(idx);
     if (result === 'invalid') return;
     Render.renderAll();
-    if (result === 'moved' && prevSelected !== null && prevTopColor) {
-      // Анимация после renderAll — иначе .pouring класс уничтожается
-      // пересозданием DOM в renderAll.
-      Render.animatePour(prevSelected, idx, prevTopColor);
-    }
-    // Туториал убираем после первого валидного клика игрока.
     if (window.Tutorial) Tutorial.notifyPlayerActed();
+    if (result === 'moved' && prevSelected !== null && prevTopColor) {
+      transferLocked = true;
+      try { await Render.animatePour(prevSelected, idx, prevTopColor); }
+      finally { transferLocked = false; }
+      if (State.isWon()) onWin();
+      return;
+    }
     if (result === 'moved' && State.isWon()) onWin();
   }
 
