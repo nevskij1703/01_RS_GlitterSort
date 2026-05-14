@@ -151,7 +151,7 @@ body{
   position:relative;
   width:100%;
   max-width:78px;
-  aspect-ratio:999 / 4378;
+  aspect-ratio:999 / 3443.5;
   cursor:pointer;
   color:#D9D9D9;
   transition:transform .25s cubic-bezier(.3,0,.3,1), color .15s, filter .15s;
@@ -180,20 +180,9 @@ body{
 }
 
 /* Деревянная пробка — SVG <rect> внутри bottle SVG; class bottle.completed
-   запускает её появление. */
-.bottle svg .cork{
-  opacity:0;
-  transform-box:fill-box;
-  transform-origin:50% 100%;
-}
-.bottle.completed svg .cork{
-  animation:corkPop .35s cubic-bezier(.3,0,.3,1) forwards;
-}
-@keyframes corkPop{
-  0%{transform:translateY(-30px) scale(.85);opacity:0}
-  60%{transform:translateY(8px)  scale(1.05);opacity:1}
-  100%{transform:translateY(0)   scale(1);opacity:1}
-}
+   показывает её мгновенно (без поп-анимации). */
+.bottle svg .cork{opacity:0}
+.bottle.completed svg .cork{opacity:1}
 /* (CSS-классы для цветов слоёв убраны — fill подставляется inline
    в SVG <rect> прямо в Render.buildBottle.) */
 
@@ -1521,16 +1510,23 @@ window.Render = (() => {
   // Слои жидкости: <rect> в области y∈[LIQ_TOP..LIQ_BOTTOM] с x/width
   // достаточно широкими, чтобы боковые края подрезались mask.
   const SVG_NS = 'http://www.w3.org/2000/svg';
-  const SVG_VIEW = '0 0 999 4378';
-  const MASK_PATH = 'M875.078 16C929.684 16 969.036 68.3714 953.839 120.82L873.87 396.82C873.703 397.395 873.53 397.967 873.352 398.536C941.127 457.39 983.983 544.189 983.983 640.999V4036C983.983 4213.28 840.267 4357 662.983 4357H336.983C159.7 4357 15.9837 4213.28 15.9834 4036V641C15.9834 545.367 57.8032 459.501 124.153 400.693C123.659 399.255 123.201 397.796 122.783 396.318L44.7168 120.318C29.9137 67.9829 69.2324 16 123.621 16H875.078Z';
-  const OUTLINE_PATH = 'M892.064 0C946.003 0 985.25 51.1814 971.257 103.273L892.888 395.002C958.129 455.122 999 541.288 999 637V4049C999 4230.7 851.702 4378 670 4378H329C147.298 4378 0 4230.7 0 4049V637C2.41415e-05 542.879 39.5238 457.99 102.879 398.022L25.459 102.801C11.8279 50.8222 51.0411 0 104.777 0H892.064ZM123.621 16C69.2324 16 29.9137 67.9829 44.7168 120.318L122.783 396.318C123.201 397.796 123.659 399.255 124.153 400.693C57.8032 459.501 15.9834 545.367 15.9834 641V4036C15.9837 4213.28 159.7 4357 336.983 4357H662.983C840.267 4357 983.983 4213.28 983.983 4036V640.999C983.983 544.189 941.127 457.39 873.352 398.536C873.53 397.967 873.703 397.395 873.87 396.82L953.839 120.82C969.036 68.3714 929.684 16 875.078 16H123.621Z';
-  const HIGHLIGHT_PATH = 'M312.638 16C258.249 16 218.93 67.9829 233.733 120.318L311.8 396.318C312.218 397.796 312.675 399.255 313.17 400.693C246.82 459.501 205 545.367 205 641V4036C205 4213.28 348.717 4357 526 4357H336.983C159.7 4357 15.9837 4213.28 15.9834 4036V641C15.9834 545.367 57.8032 459.501 124.153 400.693C123.659 399.255 123.201 397.796 122.783 396.318L44.7168 120.318C29.9137 67.9829 69.2324 16 123.621 16H312.638Z';
-  // Внутри маски area, где должна быть жидкость (4 слоя 590..1532..2474..3415..4357).
+  // Корпус сжат на 25% относительно оригинала Figma: все y ≥ 640
+  // отображены как 640 + (y - 640) * 0.75. Горлышко и плечики
+  // (y < 640) не тронуты. ViewBox уменьшен с 4378 → 3443.5.
+  const SVG_VIEW = '0 0 999 3443.5';
+  const MASK_PATH = 'M875.078 16C929.684 16 969.036 68.3714 953.839 120.82L873.87 396.82C873.703 397.395 873.53 397.967 873.352 398.536C941.127 457.39 983.983 544.189 983.983 640.7493V3187C983.983 3319.96 840.267 3427.75 662.983 3427.75H336.983C159.7 3427.75 15.9837 3319.96 15.9834 3187V640.75C15.9834 545.367 57.8032 459.501 124.153 400.693C123.659 399.255 123.201 397.796 122.783 396.318L44.7168 120.318C29.9137 67.9829 69.2324 16 123.621 16H875.078Z';
+  const OUTLINE_PATH = 'M892.064 0C946.003 0 985.25 51.1814 971.257 103.273L892.888 395.002C958.129 455.122 999 541.288 999 637V3196.75C999 3333.025 851.702 3443.5 670 3443.5H329C147.298 3443.5 0 3333.025 0 3196.75V637C2.41415e-05 542.879 39.5238 457.99 102.879 398.022L25.459 102.801C11.8279 50.8222 51.0411 0 104.777 0H892.064ZM123.621 16C69.2324 16 29.9137 67.9829 44.7168 120.318L122.783 396.318C123.201 397.796 123.659 399.255 124.153 400.693C57.8032 459.501 15.9834 545.367 15.9834 640.75V3187C15.9837 3319.96 159.7 3427.75 336.983 3427.75H662.983C840.267 3427.75 983.983 3319.96 983.983 3187V640.7493C983.983 544.189 941.127 457.39 873.352 398.536C873.53 397.967 873.703 397.395 873.87 396.82L953.839 120.82C969.036 68.3714 929.684 16 875.078 16H123.621Z';
+  const HIGHLIGHT_PATH = 'M312.638 16C258.249 16 218.93 67.9829 233.733 120.318L311.8 396.318C312.218 397.796 312.675 399.255 313.17 400.693C246.82 459.501 205 545.367 205 640.75V3187C205 3319.96 348.717 3427.75 526 3427.75H336.983C159.7 3427.75 15.9837 3319.96 15.9834 3187V640.75C15.9834 545.367 57.8032 459.501 124.153 400.693C123.659 399.255 123.201 397.796 122.783 396.318L44.7168 120.318C29.9137 67.9829 69.2324 16 123.621 16H312.638Z';
+  // Внутри маски — область жидкости. После сжатия корпуса:
+  // LIQ_TOP=590 (внутри плечиков, маска подрежет), LIQ_BOTTOM=3427.75.
   const LIQ_TOP = 590;
-  const LIQ_BOTTOM = 4357;
-  const LIQ_RANGE = LIQ_BOTTOM - LIQ_TOP;            // 3767
-  // Корка пробки (когда колба собрана) — заполняет верхушку cavity до LIQ_TOP.
+  const LIQ_BOTTOM = 3427.75;
+  const LIQ_RANGE = LIQ_BOTTOM - LIQ_TOP;
+  // Пробка — рисуется на месте горлышка и верха плечиков.
   const CORK_TOP = 16, CORK_BOTTOM = LIQ_TOP;
+  // Перекрытие слоёв (overlap), чтобы между ними не было видимой
+  // тонкой полоски фона из-за sub-pixel rendering.
+  const LAYER_OVERLAP = 20;
 
   function buildBottle(stack, idx, capacity) {
     const s = State.get();
@@ -1547,12 +1543,15 @@ window.Render = (() => {
 
     // Слои: stack[0]=низ, stack[N-1]=верх. В SVG y растёт вниз,
     // поэтому stack[i] кладём на y = LIQ_BOTTOM - (i+1)*layerH.
+    // Каждый rect расширен на LAYER_OVERLAP вверх и вниз — соседние
+    // слои перекрываются, чтобы не было сквозной полоски фона.
     const layerRects = stack.map((color, i) => {
-      const y = LIQ_BOTTOM - (i + 1) * layerH;
+      const baseY = LIQ_BOTTOM - (i + 1) * layerH;
+      const y = baseY - LAYER_OVERLAP;
+      const h = layerH + LAYER_OVERLAP * 2;
       const isNew = i >= stack.length - newCount;
       const hex = Levels.COLOR_HEX[color] || '#888';
-      // x/width — большие, чтобы боковые края обрезались маской
-      return `<rect class="layer${isNew ? ' is-new' : ''}" x="-1214" y="${y.toFixed(2)}" width="3428" height="${layerH.toFixed(2)}" fill="${hex}"/>`;
+      return `<rect class="layer${isNew ? ' is-new' : ''}" x="-1214" y="${y.toFixed(2)}" width="3428" height="${h.toFixed(2)}" fill="${hex}"/>`;
     }).join('');
 
     // Пробка (только для completed)
@@ -1606,9 +1605,9 @@ window.Render = (() => {
           </linearGradient>
         </defs>
         <path d="${OUTLINE_PATH}" fill="currentColor" fill-rule="evenodd"/>
-        <g transform="translate(499.5 2200)">
-          <circle r="280" fill="url(#plusBg)">
-            <animate attributeName="r" values="280;320;280" dur="1.6s" repeatCount="indefinite"/>
+        <g transform="translate(499.5 1750)">
+          <circle r="260" fill="url(#plusBg)">
+            <animate attributeName="r" values="260;300;260" dur="1.6s" repeatCount="indefinite"/>
           </circle>
           <path d="M -120 0 H 120 M 0 -120 V 120" stroke="#3b1300" stroke-width="64" stroke-linecap="round"/>
         </g>
@@ -1659,6 +1658,18 @@ window.Render = (() => {
    *   4. Приёмник bumps, в нём появляется новый слой (.is-new).
    *   5. Источник возвращается на исходную позицию.
    */
+  /**
+   * Источник подлетает ГОРЛЫШКОМ к горлышку приёмника и наклоняется
+   * относительно своего горлышка (pivot = верхняя точка колбы).
+   *
+   * Шаги (≈1.05s total):
+   *   1. translate так, чтобы горлышко источника оказалось чуть выше
+   *      горлышка приёмника (320ms)
+   *   2. rotate ~70° (clockwise если dst справа от src) вокруг pivot —
+   *      горлышко остаётся на месте, тело уходит в сторону (200ms)
+   *   3. появляется струйка между горлышками + bump приёмника
+   *   4. возврат: rotate→0, затем translate→0 (300ms)
+   */
   function animatePour(srcIdx, dstIdx, color) {
     return new Promise(resolve => {
       const src = $sticks.children[srcIdx];
@@ -1667,64 +1678,67 @@ window.Render = (() => {
 
       const srcRect = src.getBoundingClientRect();
       const dstRect = dst.getBoundingClientRect();
-      // dstNeckX — центр горлышка приёмника (куда льётся)
+      // Координаты горлышек в viewport-пикселях. Горлышко SVG занимает
+      // ~13% высоты колбы сверху (приближённо).
+      const srcNeckX = srcRect.left + srcRect.width / 2;
+      const srcNeckY = srcRect.top + srcRect.height * 0.04;
       const dstNeckX = dstRect.left + dstRect.width / 2;
-      const srcCx = srcRect.left + srcRect.width / 2;
-      const dx = dstNeckX - srcCx;
-      // Источник встаёт горлышком ровно над горлышком приёмника, но
-      // смещаемся в сторону на полширины — чтобы при наклоне горлышко source
-      // совпало с центром приёмника.
-      const offsetSign = dx >= 0 ? -1 : 1;
-      const flyDx = dx + offsetSign * srcRect.width * 0.45;
-      // Источник поднимается на 75% своей высоты выше горлышка приёмника
-      const flyDy = (dstRect.top - srcRect.top) - srcRect.height * 0.75;
-      const tiltDir = dx >= 0 ? 42 : -42;
+      const dstNeckY = dstRect.top + dstRect.height * 0.04;
+
+      // Translate: горлышко источника становится на ~20px выше горлышка приёмника
+      const flyDx = dstNeckX - srcNeckX;
+      const flyDy = (dstNeckY - srcNeckY) - 22;
+      // Угол: + (clockwise) если приёмник правее источника, иначе -.
+      const tiltDir = (dstNeckX >= srcNeckX) ? 70 : -70;
 
       src.classList.add('pouring');
-      // Pivot — нижняя часть колбы-источника (чтобы при наклоне горлышко
-      // двигалось дугой над приёмником, а не вокруг центра).
-      src.style.transformOrigin = '50% 92%';
+      // Pivot — горлышко (середина по X, верх по Y) самой колбы.
+      src.style.transformOrigin = '50% 4%';
 
-      // Шаг 1: подлёт (без наклона). Длится 320мс.
+      // Шаг 1: подлёт горлышка к горлышку
       src.style.transition = 'transform .32s cubic-bezier(.3,0,.25,1)';
       src.style.transform  = `translate(${flyDx}px, ${flyDy}px)`;
 
-      // Шаг 2: наклон через 320мс (~250мс)
+      // Шаг 2: наклон — горлышко остаётся на месте, тело уходит в сторону
       setTimeout(() => {
-        src.style.transition = 'transform .25s cubic-bezier(.4,0,.3,1)';
+        src.style.transition = 'transform .22s cubic-bezier(.4,0,.3,1)';
         src.style.transform  = `translate(${flyDx}px, ${flyDy}px) rotate(${tiltDir}deg)`;
 
-        // Шаг 3: струйка через 200мс после старта наклона
+        // Шаг 3: струйка через ~120мс наклона
         setTimeout(() => {
           dst.classList.add('receiving-bump');
           const stream = document.createElement('div');
           stream.className = 'pour-stream';
           stream.style.setProperty('--stream-color', `var(--c-${color}, var(--accent))`);
-          // Струйка идёт ровно в neck приёмника, тонкая, длинная
+          // Тонкая вертикальная струйка от горлышка приёмника вниз
           const liveDst = dst.getBoundingClientRect();
           const xStream = liveDst.left + liveDst.width / 2 - 3;
-          const yTop = liveDst.top - liveDst.height * 0.65;
-          const yBot = liveDst.top + liveDst.height * 0.18;
+          const yTop = liveDst.top - 26;
+          const yBot = liveDst.top + liveDst.height * 0.16;
           stream.style.left   = xStream + 'px';
           stream.style.top    = yTop + 'px';
           stream.style.height = (yBot - yTop) + 'px';
           stream.style.width  = '6px';
           document.body.appendChild(stream);
 
-          // Шаг 4: возврат источника через 380мс (пока стрим ещё течёт)
+          // Шаг 4: возврат (сначала угол → 0, потом translate → 0)
           setTimeout(() => {
-            src.style.transition = 'transform .32s cubic-bezier(.4,0,.25,1)';
-            src.style.transform  = '';
+            src.style.transition = 'transform .18s ease';
+            src.style.transform  = `translate(${flyDx}px, ${flyDy}px)`;
+            stream.remove();
             setTimeout(() => {
-              src.classList.remove('pouring');
-              dst.classList.remove('receiving-bump');
-              src.style.transition = '';
-              src.style.transformOrigin = '';
-              stream.remove();
-              resolve();
-            }, 340);
-          }, 380);
-        }, 200);
+              src.style.transition = 'transform .3s cubic-bezier(.4,0,.25,1)';
+              src.style.transform  = '';
+              setTimeout(() => {
+                src.classList.remove('pouring');
+                dst.classList.remove('receiving-bump');
+                src.style.transition = '';
+                src.style.transformOrigin = '';
+                resolve();
+              }, 320);
+            }, 200);
+          }, 360);
+        }, 120);
       }, 320);
     });
   }
