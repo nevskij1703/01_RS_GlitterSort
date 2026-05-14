@@ -255,19 +255,10 @@ body{
   35%{transform:scale(.78) translateY(6px)}
   60%{transform:scale(1.05) translateY(-2px)}
 }
-.bottle .layer.c-mint   {background:var(--c-mint)}
-.bottle .layer.c-coral  {background:var(--c-coral)}
-.bottle .layer.is-new{animation:layerDrop .35s cubic-bezier(.4,0,.25,1)}
-@keyframes layerDrop{
-  0%{transform:translateY(-20px);opacity:.0}
-  60%{transform:translateY(2px);opacity:1}
-  100%{transform:translateY(0);opacity:1}
-}
-.bottle.pouring .layer:last-child{animation:layerPour .25s ease forwards}
-@keyframes layerPour{
-  0%{transform:translateY(0);opacity:1}
-  100%{transform:translateY(-14px);opacity:0}
-}
+/* (Legacy CSS-div анимации удалены — они применялись к SVG rect.layer
+   через :last-child и заставляли верхний слой источника медленно
+   растворяться сразу после клика. Все живые анимации слоёв теперь — выше:
+   .bottle svg rect.layer.is-new + @keyframes layerFill.) */
 
 /* ===== BOTTOM BAR ===== */
 .bottom{
