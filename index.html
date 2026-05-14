@@ -145,89 +145,33 @@ body{
    с обычным border).
 */
 .bottle{
-  /* Профиль колбы по референсу Get Color: прямой корпус ~88% ширины,
-     короткие плавные плечики, узкое горлышко (35%), плоско-округлое дно. */
-  --flask-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 80 192' preserveAspectRatio='none'><path d='M26 0 L54 0 L54 8 C54 12 75 14 75 30 L75 162 C75 178 70 192 60 192 L20 192 C10 192 5 178 5 162 L5 30 C5 14 26 12 26 8 Z' fill='black'/></svg>");
+  /* Колба рисуется как inline-SVG внутри .bottle (см. Render.buildBottle).
+     Контур (outline path) использует currentColor — меняем цвет состояния
+     через CSS color: вместо filter-обводки. */
   position:relative;
   width:100%;
   max-width:78px;
-  aspect-ratio:80 / 192;
+  aspect-ratio:999 / 4378;
   cursor:pointer;
-  background:rgba(255,255,255,.03);
-  -webkit-mask:var(--flask-mask) center / 100% 100% no-repeat;
-          mask:var(--flask-mask) center / 100% 100% no-repeat;
-  transition:transform .25s cubic-bezier(.3,0,.3,1), filter .15s;
-  /* Тонкая светло-голубая обводка + мягкая тень. */
-  filter:
-    drop-shadow( 1px  0  0 rgba(180,200,255,.6))
-    drop-shadow(-1px  0  0 rgba(180,200,255,.6))
-    drop-shadow( 0  1px  0 rgba(180,200,255,.6))
-    drop-shadow( 0 -1px  0 rgba(180,200,255,.6))
-    drop-shadow(0 4px 10px rgba(0,0,0,.5));
+  color:#D9D9D9;
+  transition:transform .25s cubic-bezier(.3,0,.3,1), color .15s, filter .15s;
+  filter:drop-shadow(0 4px 10px rgba(0,0,0,.5));
 }
+.bottle svg{width:100%;height:100%;display:block;overflow:visible}
 .bottle.selected{
   transform:translateY(-16px);
-  filter:
-    drop-shadow( 1.5px  0  0 var(--accent))
-    drop-shadow(-1.5px  0  0 var(--accent))
-    drop-shadow( 0  1.5px  0 var(--accent))
-    drop-shadow( 0 -1.5px  0 var(--accent))
-    drop-shadow(0 10px 16px rgba(255,216,107,.35));
+  color:var(--accent);
+  filter:drop-shadow(0 10px 16px rgba(255,216,107,.35));
 }
 .bottle.completed{
-  filter:
-    drop-shadow( 1.5px  0  0 var(--ok))
-    drop-shadow(-1.5px  0  0 var(--ok))
-    drop-shadow( 0  1.5px  0 var(--ok))
-    drop-shadow( 0 -1.5px  0 var(--ok))
-    drop-shadow(0 6px 12px rgba(0,0,0,.42));
+  color:var(--ok);
+  filter:drop-shadow(0 6px 12px rgba(0,0,0,.42));
 }
 
-/* Контейнер слоёв — прижат к низу корпуса колбы (после плечиков ≈ 14%
-   высоты mask'а). Сама форма уже обрезана mask'ом, layers могут идти на
-   всю ширину — края подрежет mask автоматически. */
-.bottle .layers{
-  position:absolute;
-  left:0;right:0;bottom:0;
-  top:14%;
-  display:flex;
-  flex-direction:column-reverse;
-  overflow:hidden;
-  z-index:1;
-}
-.bottle .layer{
-  width:100%;
-  background:var(--layer-color, #888);
-  flex:0 0 auto;
-  height:calc(100% / var(--cap, 4));
-  transition:background .15s ease;
-  position:relative;
-}
-/* «Глиттер» — россыпь мелких светлых искр в каждом слое жидкости. */
-.bottle .layer::after{
-  content:'';
-  position:absolute;inset:0;
-  background-image:
-    radial-gradient(circle 1.2px at 18% 22%, rgba(255,255,255,.65), transparent 2px),
-    radial-gradient(circle 1px   at 78% 35%, rgba(255,255,255,.55), transparent 1.8px),
-    radial-gradient(circle 1.4px at 42% 58%, rgba(255,255,255,.6),  transparent 2.2px),
-    radial-gradient(circle 1px   at 88% 70%, rgba(255,255,255,.55), transparent 1.8px),
-    radial-gradient(circle 1.2px at 28% 82%, rgba(255,255,255,.6),  transparent 2px),
-    radial-gradient(circle .9px  at 62% 18%, rgba(255,255,255,.5),  transparent 1.4px),
-    radial-gradient(circle 1px   at 12% 50%, rgba(255,255,255,.5),  transparent 1.6px),
-    radial-gradient(circle 1px   at 55% 88%, rgba(255,255,255,.55), transparent 1.6px);
-  pointer-events:none;
-  mix-blend-mode:overlay;
-  animation:glitterTwinkle 2.4s ease-in-out infinite;
-}
-@keyframes glitterTwinkle{
-  0%,100%{opacity:.75}
-  50%{opacity:1}
-}
-
-/* Анимация наполнения нового слоя — растёт сверху вниз. */
-.bottle .layer.is-new{
-  transform-origin:top center;
+/* Анимация наполнения нового слоя — SVG rect растёт сверху вниз через scaleY. */
+.bottle svg rect.layer.is-new{
+  transform-box:fill-box;
+  transform-origin:50% 0%;
   animation:layerFill .4s cubic-bezier(.3,0,.3,1) both;
 }
 @keyframes layerFill{
@@ -235,50 +179,30 @@ body{
   100%{transform:scaleY(1);opacity:1}
 }
 
-/* (Старый внутренний блик удалён — на референсе Get Color его нет.) */
-.bottle .gloss{display:none}
-
-/* Деревянная пробка — отдельный child, заполняет верхнюю узкую часть mask
-   (от 0% до ~16% высоты). Mask автоматически обрезает её под форму neck. */
-.bottle .cork{
-  position:absolute;
-  left:0;right:0;top:0;
-  height:16%;
-  background:linear-gradient(180deg, #e3b97e 0%, #c08d4b 55%, #8a5a26 100%);
-  box-shadow:
-    inset 3px 0 3px -1px rgba(255,230,180,.5),
-    inset -3px 0 3px -1px rgba(0,0,0,.35),
-    inset 0 -3px 4px rgba(0,0,0,.28);
-  z-index:4;
-  pointer-events:none;
-  animation:corkPop .3s cubic-bezier(.3,0,.3,1) both;
+/* Деревянная пробка — SVG <rect> внутри bottle SVG; class bottle.completed
+   запускает её появление. */
+.bottle svg .cork{
+  opacity:0;
+  transform-box:fill-box;
+  transform-origin:50% 100%;
+}
+.bottle.completed svg .cork{
+  animation:corkPop .35s cubic-bezier(.3,0,.3,1) forwards;
 }
 @keyframes corkPop{
-  0%{transform:translateY(-6px) scale(.85);opacity:0}
-  60%{transform:translateY(2px) scale(1.05);opacity:1}
-  100%{transform:translateY(0) scale(1);opacity:1}
+  0%{transform:translateY(-30px) scale(.85);opacity:0}
+  60%{transform:translateY(8px)  scale(1.05);opacity:1}
+  100%{transform:translateY(0)   scale(1);opacity:1}
 }
-.bottle .layer.c-pink   {background:var(--c-pink)}
-.bottle .layer.c-orange {background:var(--c-orange)}
-.bottle .layer.c-yellow {background:var(--c-yellow)}
-.bottle .layer.c-lime   {background:var(--c-lime)}
-.bottle .layer.c-teal   {background:var(--c-teal)}
-.bottle .layer.c-blue   {background:var(--c-blue)}
-.bottle .layer.c-purple {background:var(--c-purple)}
-.bottle .layer.c-crimson{background:var(--c-crimson)}
-.bottle .layer.c-cyan   {background:var(--c-cyan)}
+/* (CSS-классы для цветов слоёв убраны — fill подставляется inline
+   в SVG <rect> прямо в Render.buildBottle.) */
 
 /* ===== «+» bottle — полупрозрачная колба для активации бонуса ===== */
 .bottle.bottle-add{
-  background:rgba(255,216,107,.06);
-  filter:
-    drop-shadow( 1px  0  0 rgba(255,216,107,.45))
-    drop-shadow(-1px  0  0 rgba(255,216,107,.45))
-    drop-shadow( 0  1px  0 rgba(255,216,107,.45))
-    drop-shadow( 0 -1px  0 rgba(255,216,107,.45));
+  color:rgba(255,216,107,.55);
+  filter:drop-shadow(0 4px 8px rgba(0,0,0,.4));
 }
-.bottle.bottle-add .gloss{display:none}
-.bottle.bottle-add:hover{background:rgba(255,216,107,.12)}
+.bottle.bottle-add:hover{color:var(--accent)}
 .bottle.bottle-add .add-plus{
   position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
   width:36px;height:36px;border-radius:50%;
@@ -1588,55 +1512,108 @@ window.Render = (() => {
     renderActionButtons();
   }
 
+  // === Inline-SVG модель колбы (исходник пользователя из Figma) ===
+  // viewBox 999×4378. Внутри:
+  //   – mask (форма cavity для слоёв жидкости)
+  //   – серая обводка (outer path, even-odd с inner cavity)
+  //   – полупрозрачный белый блик слева
+  //   – наклонная «таблетка» блика на горлышке
+  // Слои жидкости: <rect> в области y∈[LIQ_TOP..LIQ_BOTTOM] с x/width
+  // достаточно широкими, чтобы боковые края подрезались mask.
+  const SVG_NS = 'http://www.w3.org/2000/svg';
+  const SVG_VIEW = '0 0 999 4378';
+  const MASK_PATH = 'M875.078 16C929.684 16 969.036 68.3714 953.839 120.82L873.87 396.82C873.703 397.395 873.53 397.967 873.352 398.536C941.127 457.39 983.983 544.189 983.983 640.999V4036C983.983 4213.28 840.267 4357 662.983 4357H336.983C159.7 4357 15.9837 4213.28 15.9834 4036V641C15.9834 545.367 57.8032 459.501 124.153 400.693C123.659 399.255 123.201 397.796 122.783 396.318L44.7168 120.318C29.9137 67.9829 69.2324 16 123.621 16H875.078Z';
+  const OUTLINE_PATH = 'M892.064 0C946.003 0 985.25 51.1814 971.257 103.273L892.888 395.002C958.129 455.122 999 541.288 999 637V4049C999 4230.7 851.702 4378 670 4378H329C147.298 4378 0 4230.7 0 4049V637C2.41415e-05 542.879 39.5238 457.99 102.879 398.022L25.459 102.801C11.8279 50.8222 51.0411 0 104.777 0H892.064ZM123.621 16C69.2324 16 29.9137 67.9829 44.7168 120.318L122.783 396.318C123.201 397.796 123.659 399.255 124.153 400.693C57.8032 459.501 15.9834 545.367 15.9834 641V4036C15.9837 4213.28 159.7 4357 336.983 4357H662.983C840.267 4357 983.983 4213.28 983.983 4036V640.999C983.983 544.189 941.127 457.39 873.352 398.536C873.53 397.967 873.703 397.395 873.87 396.82L953.839 120.82C969.036 68.3714 929.684 16 875.078 16H123.621Z';
+  const HIGHLIGHT_PATH = 'M312.638 16C258.249 16 218.93 67.9829 233.733 120.318L311.8 396.318C312.218 397.796 312.675 399.255 313.17 400.693C246.82 459.501 205 545.367 205 641V4036C205 4213.28 348.717 4357 526 4357H336.983C159.7 4357 15.9837 4213.28 15.9834 4036V641C15.9834 545.367 57.8032 459.501 124.153 400.693C123.659 399.255 123.201 397.796 122.783 396.318L44.7168 120.318C29.9137 67.9829 69.2324 16 123.621 16H312.638Z';
+  // Внутри маски area, где должна быть жидкость (4 слоя 590..1532..2474..3415..4357).
+  const LIQ_TOP = 590;
+  const LIQ_BOTTOM = 4357;
+  const LIQ_RANGE = LIQ_BOTTOM - LIQ_TOP;            // 3767
+  // Корка пробки (когда колба собрана) — заполняет верхушку cavity до LIQ_TOP.
+  const CORK_TOP = 16, CORK_BOTTOM = LIQ_TOP;
+
   function buildBottle(stack, idx, capacity) {
     const s = State.get();
     const el = document.createElement('div');
     el.className = 'bottle';
     el.dataset.idx = String(idx);
-    el.style.setProperty('--cap', capacity);
     if (s.selected === idx) el.classList.add('selected');
     const completed = State.isCompletedStack(stack, capacity);
     if (completed) el.classList.add('completed');
 
-    // Слои (от низа вверх через column-reverse)
-    const layers = document.createElement('div');
-    layers.className = 'layers';
+    const layerH = LIQ_RANGE / capacity;
     const lastAdded = s.lastAdded;
     const newCount = (lastAdded && lastAdded.idx === idx) ? lastAdded.count : 0;
-    stack.forEach((color, i) => {
-      const layer = document.createElement('div');
-      layer.className = 'layer c-' + color;
-      // Помечаем последние newCount layer'ов как новые (для анимации наполнения)
-      if (i >= stack.length - newCount) layer.classList.add('is-new');
-      layers.appendChild(layer);
-    });
-    el.appendChild(layers);
 
-    // Стеклянный блик слева
-    const gloss = document.createElement('div');
-    gloss.className = 'gloss';
-    el.appendChild(gloss);
+    // Слои: stack[0]=низ, stack[N-1]=верх. В SVG y растёт вниз,
+    // поэтому stack[i] кладём на y = LIQ_BOTTOM - (i+1)*layerH.
+    const layerRects = stack.map((color, i) => {
+      const y = LIQ_BOTTOM - (i + 1) * layerH;
+      const isNew = i >= stack.length - newCount;
+      const hex = Levels.COLOR_HEX[color] || '#888';
+      // x/width — большие, чтобы боковые края обрезались маской
+      return `<rect class="layer${isNew ? ' is-new' : ''}" x="-1214" y="${y.toFixed(2)}" width="3428" height="${layerH.toFixed(2)}" fill="${hex}"/>`;
+    }).join('');
 
-    // Деревянная пробка для собранной колбы (mask автоматически
-    // подрежет её под форму горлышка).
-    if (completed) {
-      const cork = document.createElement('div');
-      cork.className = 'cork';
-      el.appendChild(cork);
-    }
+    // Пробка (только для completed)
+    const corkRect = completed
+      ? `<rect class="cork" x="-1214" y="${CORK_TOP}" width="3428" height="${CORK_BOTTOM - CORK_TOP}" fill="url(#corkGrad${idx})"/>`
+      : '';
+    const corkDefs = completed
+      ? `<linearGradient id="corkGrad${idx}" x1="0" y1="0" x2="0" y2="1">
+           <stop offset="0"   stop-color="#e3b97e"/>
+           <stop offset="0.55" stop-color="#c08d4b"/>
+           <stop offset="1"   stop-color="#8a5a26"/>
+         </linearGradient>`
+      : '';
+
+    el.innerHTML = `
+      <svg viewBox="${SVG_VIEW}" preserveAspectRatio="xMidYMid meet" xmlns="${SVG_NS}">
+        <defs>
+          <mask id="bottleMask${idx}" maskUnits="userSpaceOnUse" x="15" y="16" width="969" height="4341">
+            <path d="${MASK_PATH}" fill="white"/>
+          </mask>
+          ${corkDefs}
+        </defs>
+        <g mask="url(#bottleMask${idx})">
+          ${layerRects}
+          ${corkRect}
+        </g>
+        <!-- Обводка (use currentColor → меняется через CSS .selected/.completed) -->
+        <path d="${OUTLINE_PATH}" fill="currentColor" fill-rule="evenodd"/>
+        <!-- Левый внутренний блик -->
+        <path d="${HIGHLIGHT_PATH}" fill="white" fill-opacity="0.13"/>
+        <!-- Наклонная «таблетка» блика на горлышке -->
+        <rect x="76" y="86.2461" width="58.4172" height="280" rx="29.2086" transform="rotate(-15.1276 76 86.2461)" fill="#D9D9D9"/>
+      </svg>
+    `;
     return el;
   }
 
+  // Полупрозрачная «+» колба — тот же силуэт, без жидкости, со знаком «+»
+  // нарисованным внутри SVG (чтобы не торчал за границы маски).
   function buildAddBottle(capacity) {
     const el = document.createElement('div');
     el.className = 'bottle bottle-add';
     el.dataset.role = 'add';
-    el.style.setProperty('--cap', capacity);
     el.title = '+ Колба за рекламу';
-    const plus = document.createElement('div');
-    plus.className = 'add-plus';
-    plus.textContent = '+';
-    el.appendChild(plus);
+    el.innerHTML = `
+      <svg viewBox="${SVG_VIEW}" preserveAspectRatio="xMidYMid meet" xmlns="${SVG_NS}">
+        <defs>
+          <linearGradient id="plusBg" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="#ffd23f"/>
+            <stop offset="1" stop-color="#ff8a2b"/>
+          </linearGradient>
+        </defs>
+        <path d="${OUTLINE_PATH}" fill="currentColor" fill-rule="evenodd"/>
+        <g transform="translate(499.5 2200)">
+          <circle r="280" fill="url(#plusBg)">
+            <animate attributeName="r" values="280;320;280" dur="1.6s" repeatCount="indefinite"/>
+          </circle>
+          <path d="M -120 0 H 120 M 0 -120 V 120" stroke="#3b1300" stroke-width="64" stroke-linecap="round"/>
+        </g>
+      </svg>
+    `;
     return el;
   }
 
