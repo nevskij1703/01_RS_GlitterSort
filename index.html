@@ -1605,17 +1605,61 @@ window.Render = (() => {
     return DIFF_TIERS.find(t => optimalSteps <= t.maxSteps);
   }
 
+  /**
+   * Ключ визуального состояния колбы. Используется в renderAll для
+   * reconciliation: если у существующего DOM-элемента dataset.key совпадает
+   * с желаемым, мы НЕ пересобираем его — это нужно чтобы:
+   *   – галочка-бейдж не «моргала» (checkPop animation не перезапускалась)
+   *     на собранных колбах при любом клике;
+   *   – пульсация «+» (SVG <animate>) на бонусной колбе шла непрерывно,
+   *     а не рестартилась с каждым ре-рендером;
+   *   – fill-анимация слоёв не дёргалась после хода.
+   * В ключ НЕ включаем lastAdded.count: первый buildBottle добавит .is-new,
+   * последующий renderAll увидит совпадение ключей и оставит DOM как есть
+   * (анимация уже отыграла за счёт fill-mode:both).
+   */
+  function bottleKey(stack, idx, completed, selected) {
+    return `b${idx}|${stack.join(',')}|c${completed?1:0}|s${selected?1:0}`;
+  }
+
   function renderAll() {
     const s = State.get();
     if (!s) return;
     const showAdd = !s.bonusUsedThisLevel && s.sticks.length < 13;
     const totalCount = s.sticks.length + (showAdd ? 1 : 0);
     $sticks.dataset.count = String(totalCount);
-    $sticks.innerHTML = '';
-    s.sticks.forEach((stack, idx) => $sticks.appendChild(buildBottle(stack, idx, s.capacity)));
-    if (showAdd) $sticks.appendChild(buildAddBottle(s.capacity));
+
+    // Желаемый порядок: сначала все колбы, потом (если есть) bonus-add.
+    const desired = s.sticks.map((stack, idx) => {
+      const completed = State.isCompletedStack(stack, s.capacity);
+      const isSelected = s.selected === idx;
+      return {
+        kind: 'bottle', idx, stack, completed, isSelected,
+        key: bottleKey(stack, idx, completed, isSelected),
+      };
+    });
+    if (showAdd) desired.push({ kind: 'add', key: 'add' });
+
+    // Reconcile: проходим по существующим детям и сверяем ключи.
+    // Совпал — не трогаем. Не совпал — заменяем. Если детей меньше — добавляем.
+    const existing = Array.from($sticks.children);
+    for (let i = 0; i < desired.length; i++) {
+      const want = desired[i];
+      const have = existing[i];
+      if (have && have.dataset.key === want.key) continue;
+      const el = want.kind === 'add'
+        ? buildAddBottle(s.capacity)
+        : buildBottle(want.stack, want.idx, s.capacity);
+      if (have) have.replaceWith(el);
+      else $sticks.appendChild(el);
+    }
+    // Удаляем лишних детей (например, исчезла bonus-add колба).
+    for (let i = existing.length - 1; i >= desired.length; i--) {
+      existing[i].remove();
+    }
+
     // Метку «новые слои» сбрасываем после рендера — иначе следующий renderAll
-    // без хода пере-играл бы анимацию заполнения.
+    // без хода пере-играл бы анимацию заполнения (это пути с keyMismatch).
     if (s.lastAdded) s.lastAdded = null;
     renderHud();
     renderActionButtons();
@@ -1697,9 +1741,13 @@ window.Render = (() => {
     const el = document.createElement('div');
     el.className = 'bottle';
     el.dataset.idx = String(idx);
-    if (s.selected === idx) el.classList.add('selected');
+    const isSelected = s.selected === idx;
+    if (isSelected) el.classList.add('selected');
     const completed = State.isCompletedStack(stack, capacity);
     if (completed) el.classList.add('completed');
+    // dataset.key — отпечаток визуального состояния. renderAll использует
+    // его для reconcile, чтобы НЕ пересобирать колбы без изменений.
+    el.dataset.key = bottleKey(stack, idx, completed, isSelected);
 
     const layerH = LIQ_RANGE / capacity;
     const lastAdded = s.lastAdded;
@@ -1764,6 +1812,10 @@ window.Render = (() => {
     const el = document.createElement('div');
     el.className = 'bottle bottle-add';
     el.dataset.role = 'add';
+    // Стабильный key — renderAll reconcile никогда не пересоберёт bonus-колбу
+    // повторно (пока она вообще остаётся в desired), чтобы SVG <animate>
+    // пульсации «+» шла непрерывно и не «моргала» на каждом клике.
+    el.dataset.key = 'add';
     el.title = '+ Колба за рекламу';
     el.innerHTML = `
       <svg viewBox="${SVG_VIEW}" preserveAspectRatio="xMidYMid meet" xmlns="${SVG_NS}">
