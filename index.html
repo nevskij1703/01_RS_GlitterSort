@@ -61,33 +61,7 @@ body{
 
 #app{position:fixed;inset:0;display:flex;flex-direction:column;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
 
-/* ===== HEADER ===== */
-.header{
-  display:flex;align-items:center;justify-content:flex-end;
-  padding:14px 16px 4px;
-  flex:0 0 auto;
-}
-.level-badge{
-  background:var(--panel);
-  border:1px solid var(--panel-border);
-  border-radius:14px;
-  padding:8px 18px;
-  font-size:18px;
-  letter-spacing:.5px;
-  box-shadow:0 4px 12px rgba(0,0,0,.25);
-}
-.level-badge b{color:var(--accent);font-weight:400}
-.moves-pill{
-  background:var(--panel);
-  border:1px solid var(--panel-border);
-  border-radius:14px;
-  padding:8px 14px;
-  font-size:14px;
-  color:var(--text-dim);
-  min-width:74px;
-  text-align:center;
-}
-.moves-pill b{color:var(--text);font-weight:400}
+/* (header убран — счётчик ходов скрыт) */
 
 /* ===== LEVEL TITLE (большие буквы по середине + сложность) ===== */
 .level-title{
@@ -518,10 +492,6 @@ body{
 </head>
 <body>
 <div id="app">
-  <div class="header">
-    <div class="moves-pill">Ходов: <b id="hud-moves">0</b></div>
-  </div>
-
   <div class="level-title">
     <div class="lt-name" id="hud-level-tap">Уровень <b id="hud-level">1</b></div>
     <div class="lt-diff" id="hud-diff">Очень просто</div>
@@ -1650,7 +1620,7 @@ window.Render = (() => {
     const s = State.get();
     if (!s) return;
     $hudLevel.textContent = s.level;
-    $hudMoves.textContent = s.moves;
+    if ($hudMoves) $hudMoves.textContent = s.moves;
     if ($hudDiff) {
       const d = getDifficulty(s.sticks.length, s.capacity);
       $hudDiff.textContent = d.name;
