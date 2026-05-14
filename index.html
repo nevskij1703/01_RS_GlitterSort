@@ -956,6 +956,15 @@ window.Levels = (() => {
   // -------- Generator V2: random + BFS-tuned --------
   let _lastTuningMeta = null;
 
+  /**
+   * Random-tuned generator. Гонится пока не выйдет бюджет `tuningTimeoutMs`,
+   * подбирает раскладку с BFS-оптимумом равным `difficulty`.
+   *
+   * Опционально: `requireBonus: true` → принимаются ТОЛЬКО раскладки,
+   * которые НЕРЕШАЕМЫ при текущем числе пустых колб, но РЕШАЕМЫ если
+   * добавить одну дополнительную пустую колбу (имитация активации
+   * бонуса «+1 колба за рекламу»). Это даёт уровень-«нельзя без бонуса».
+   */
   function generateRandomTuned(params) {
     const target = clampDifficulty(params.difficulty);
     const timeoutMs = clampTimeout(params.tuningTimeoutMs);
@@ -963,38 +972,45 @@ window.Levels = (() => {
     const rng = mulberry32(seed);
     const capacity = params.capacity;
     const multiTransfer = params.multiTransfer !== false;
-    const easyMode = params.easyMode === true;
-    const distinctLayers = params.distinctLayers === true;
-    const easyAttempts = Math.max(1, Math.min(100000, (params.easyModeMaxAttempts | 0) || 100));
-    const maxAttempts = easyMode ? easyAttempts : Infinity;
+    const requireBonus = params.requireBonus === true;
     const t0 = performance.now();
 
     let best = null;
-    let attempts = 0, solvableAttempts = 0, deadEndFreeAttempts = 0;
+    let attempts = 0, solvableAttempts = 0;
 
     while (true) {
       const elapsed = performance.now() - t0;
       if (elapsed >= timeoutMs) break;
-      if (attempts >= maxAttempts) break;
-      const layout = randomLayout({ ...params, distinctLayers }, rng);
+      const layout = randomLayout(params, rng);
       attempts++;
       if (Solver.isSolved(layout, capacity)) continue;
       const remaining = timeoutMs - elapsed;
       const perAttempt = Math.min(remaining, 1000);
-      const result = Solver.findShortestPath(layout, capacity, perAttempt, { multiTransfer });
-      if (result.length === null) continue;
-      solvableAttempts++;
-      if (easyMode) {
-        const remainingForCheck = Math.max(100, Math.floor((timeoutMs - (performance.now() - t0)) / 5));
-        const verdict = Solver.findReachableDeadEnds(layout, capacity, {
-          multiTransfer, timeLimitMs: Math.min(1000, remainingForCheck),
-        });
-        if (!verdict.ok) continue;
-        deadEndFreeAttempts++;
+      const base = Solver.findShortestPath(layout, capacity, perAttempt, { multiTransfer });
+
+      let optimalLength;
+      if (requireBonus) {
+        // Базовый layout должен быть НЕРЕШАЕМ (BFS прошёл всё и не нашёл goal).
+        if (base.length !== null) continue;          // решаем без бонуса — мимо
+        if (!base.exhausted) continue;               // timeout — не можем подтвердить
+        // С +1 пустой колбой раскладка должна быть РЕШАЕМОЙ.
+        const bonusLayout = layout.map(s => [...s]);
+        bonusLayout.push([]);
+        const remaining2 = timeoutMs - (performance.now() - t0);
+        if (remaining2 <= 0) break;
+        const bonus = Solver.findShortestPath(bonusLayout, capacity,
+          Math.min(remaining2, 1000), { multiTransfer });
+        if (bonus.length === null) continue;         // даже с +1 нерешаем — мимо
+        optimalLength = bonus.length;
+      } else {
+        if (base.length === null) continue;
+        optimalLength = base.length;
       }
-      const distance = Math.abs(result.length - target);
+      solvableAttempts++;
+
+      const distance = Math.abs(optimalLength - target);
       if (!best || distance < best.distance) {
-        best = { bottles: layout, optimalLength: result.length, distance };
+        best = { bottles: layout, optimalLength, distance };
         if (distance === 0) break;
       }
     }
@@ -1002,21 +1018,22 @@ window.Levels = (() => {
 
     if (!best) {
       _lastTuningMeta = {
-        attempts, solvableAttempts, deadEndFreeAttempts, elapsedMs,
+        attempts, solvableAttempts, elapsedMs,
         optimalLength: null, distance: null,
         achievedExact: false, fallback: true,
-        easyModeFailed: easyMode,
+        requireBonusFailed: requireBonus,
+        requireBonus,
         target,
       };
       return { bottles: reverseShuffleFromSolved(params), ..._lastTuningMeta };
     }
     _lastTuningMeta = {
-      attempts, solvableAttempts, deadEndFreeAttempts, elapsedMs,
+      attempts, solvableAttempts, elapsedMs,
       optimalLength: best.optimalLength,
       distance: best.distance,
       achievedExact: best.distance === 0,
       fallback: false,
-      easyMode,
+      requireBonus,
       target,
     };
     return { bottles: best.bottles, ..._lastTuningMeta };
@@ -1028,19 +1045,7 @@ window.Levels = (() => {
     // Ровно `filled` уникальных цветов: каждый цвет = capacity пончиков
     // = ровно 1 полная колба в решённом состоянии.
     const colours = pickColours(params, filled, rng);
-
-    if (params.distinctLayers === true) {
-      // Каждый слой = пермутация всех `filled` цветов (без повторов в слое).
-      const state = [];
-      for (let i = 0; i < filled; i++) state.push([]);
-      for (let layer = 0; layer < capacity; layer++) {
-        const perm = shuffleInPlace([...colours], rng);
-        for (let stick = 0; stick < filled; stick++) state[stick].push(perm[stick]);
-      }
-      for (let i = 0; i < emptyStick; i++) state.push([]);
-      return state;
-    }
-    // Default: каждый цвет имеет ровно `capacity` пончиков; раскладка перемешана.
+    // Каждый цвет имеет ровно `capacity` пончиков; раскладка перемешана.
     const flat = [];
     for (const c of colours) for (let i = 0; i < capacity; i++) flat.push(c);
     shuffleInPlace(flat, rng);
@@ -1508,9 +1513,7 @@ window.DevPanel = (() => {
   let isOpen = false;
   let working = null;
   let editingLevel = 1;
-  let easyModeMaxAttempts = 100;
-  let distinctLayers = true;
-  let easyMode = true;
+  let requireBonus = false;
 
   function open() {
     isOpen = true;
@@ -1563,31 +1566,18 @@ window.DevPanel = (() => {
     <div class="dev-row"><label>Объём</label><input type="number" id="le-cap" min="2" max="6" step="1"></div>
     <div class="dev-row"><label>Пустых столбиков</label><input type="number" id="le-empty" min="0" step="1"></div>
     <div class="dev-row"><label>Кол-во ходов</label><input type="number" id="le-diff" min="1" max="1000" step="1"></div>
-    <div class="dev-row"><label>Опыт</label><input type="number" id="le-reward" min="0" step="1"></div>
     <div class="dev-row">
       <label>Тайм-аут</label>
       <input type="number" id="le-gen-tuneout" min="0.1" max="600" step="0.5" style="flex:0 0 80px;"> <span style="color:var(--text-dim)">сек</span>
     </div>
-    <div class="dev-row">
-      <label>Попыток (Easy Mode)</label>
-      <input type="number" id="le-easy-attempts" min="1" max="100000" step="10" style="flex:0 0 80px;">
-    </div>
     <label class="checkbox" style="margin:6px 0 2px;">
-      <input type="checkbox" id="le-easy-mode">
-      Easy Mode (без тупиков)
+      <input type="checkbox" id="le-require-bonus">
+      Решаемо только при +1 колбе
     </label>
     <p style="margin:0 0 4px;color:var(--text-dim);font-size:11px;">
-      Перебираем кандидатов и принимаем только тот, где из любого достижимого
-      состояния можно дойти до решения. Если за указанное число попыток
-      не нашлось — выводится сообщение об ошибке.
-    </p>
-    <label class="checkbox" style="margin:6px 0 2px;">
-      <input type="checkbox" id="le-distinct-layers">
-      Разные цвета на одном слое
-    </label>
-    <p style="margin:0 0 4px;color:var(--text-dim);font-size:11px;">
-      На каждой горизонтальной строке (на одной высоте) все пончики будут разных цветов.
-      Эмпирически ускоряет Easy-Mode-генерацию: такие раскладки чаще оказываются без тупиков.
+      Принимаются только раскладки, нерешаемые с текущим числом пустых
+      колб, но решаемые если игрок активирует «+1 колба за рекламу».
+      Если за тайм-аут таких раскладок не нашлось — выводится сообщение об ошибке.
     </p>
 
     <div class="actions" style="margin-top:10px;">
@@ -1688,22 +1678,12 @@ window.DevPanel = (() => {
     ['#le-sticks', '#le-cap', '#le-empty', '#le-diff'].forEach(sel => {
       $(sel).addEventListener('change', () => { readScalarsIntoWorking(); markPending(); });
     });
-    $('#le-reward').addEventListener('change', () => {
-      working.reward = Math.max(0, +$('#le-reward').value | 0);
-      pushCurrentToRuntime();
-    });
     $('#le-gen-tuneout').addEventListener('change', () => {
       const sec = Math.max(0.1, Math.min(600, +$('#le-gen-tuneout').value || 5));
       $('#le-gen-tuneout').value = sec;
       working.tuningTimeoutMs = Math.round(sec * 1000);
     });
-    $('#le-easy-attempts').addEventListener('change', () => {
-      const n = Math.max(1, Math.min(100000, +$('#le-easy-attempts').value | 0 || 100));
-      $('#le-easy-attempts').value = n;
-      easyModeMaxAttempts = n;
-    });
-    $('#le-distinct-layers').addEventListener('change', (e) => { distinctLayers = !!e.target.checked; });
-    $('#le-easy-mode').addEventListener('change', (e) => { easyMode = !!e.target.checked; });
+    $('#le-require-bonus').addEventListener('change', (e) => { requireBonus = !!e.target.checked; });
 
     $('#le-generate').addEventListener('click', generateNow);
     $('#le-copy').addEventListener('click', copyJson);
@@ -1751,7 +1731,6 @@ window.DevPanel = (() => {
       sticks:     params.sticks,
       capacity:   params.capacity,
       emptyStick: params.emptyStick ?? 1,
-      reward:     params.reward ?? 100,
       difficulty: params.difficulty ?? 50,
       colours:    baseColours,
       tuningTimeoutMs: params.tuningTimeoutMs ?? 5000,
@@ -1761,11 +1740,8 @@ window.DevPanel = (() => {
     $('#le-cap').value    = working.capacity;
     $('#le-empty').value  = working.emptyStick;
     $('#le-diff').value   = working.difficulty;
-    $('#le-reward').value = working.reward;
     $('#le-gen-tuneout').value = (working.tuningTimeoutMs / 1000).toString();
-    $('#le-easy-attempts').value = easyModeMaxAttempts;
-    $('#le-distinct-layers').checked = distinctLayers;
-    $('#le-easy-mode').checked = easyMode;
+    $('#le-require-bonus').checked = requireBonus;
 
     renderTypesRow();
     clearPending();
@@ -1844,12 +1820,12 @@ window.DevPanel = (() => {
       sticks:     working.sticks,
       capacity:   working.capacity,
       emptyStick: working.emptyStick,
-      reward:     working.reward,
       difficulty: working.difficulty,
       colours:    working.colours.slice(0, Math.max(filled, 1)),
       seed,
       generator: 'random-tuned',
       tuningTimeoutMs: working.tuningTimeoutMs,
+      requireBonus,
     };
   }
 
@@ -1889,9 +1865,7 @@ window.DevPanel = (() => {
         tuningTimeoutMs: working.tuningTimeoutMs,
         seed,
         multiTransfer: true,
-        easyMode,
-        easyModeMaxAttempts,
-        distinctLayers,
+        requireBonus,
       });
       working.abstractBottles = meta.bottles;
       const persistableMeta = { ...meta };
@@ -1905,12 +1879,11 @@ window.DevPanel = (() => {
   function showTuningMeta(meta) {
     const status = $('#le-gen-status');
     if (!status) return;
-    if (meta.easyModeFailed) {
+    if (meta.requireBonusFailed) {
       status.innerHTML =
-        `<span style="color:#e87">❌ Easy Mode: за ${meta.attempts} попыток не нашёл `
-        + `раскладку без тупиков. Попробуй уменьшить difficulty, увеличить пустых `
-        + `столбиков или уменьшить число цветов. (решаемых: ${meta.solvableAttempts}, `
-        + `${formatSec(meta.elapsedMs)})</span>`;
+        `<span style="color:#e87">❌ Режим «+1 колба»: за ${formatSec(meta.elapsedMs)} (${meta.attempts} попыток) `
+        + `не нашёл раскладку, нерешаемую без бонуса и решаемую с ним. `
+        + `Попробуй увеличить difficulty или уменьшить пустых столбиков.</span>`;
       return;
     }
     if (meta.fallback) {
@@ -1920,11 +1893,11 @@ window.DevPanel = (() => {
     const exact = meta.achievedExact
       ? `<span style="color:#7e7">точно ${meta.optimalLength} ход.</span>`
       : `<span style="color:#fb7">≈ ${meta.optimalLength} ход. (цель ${meta.target}, отклонение ${meta.distance})</span>`;
-    const easyTag = meta.easyMode
-      ? ` · <span style="color:#7e7">no dead-ends ✓</span>`
+    const bonusTag = meta.requireBonus
+      ? ` · <span style="color:#7e7">только с +1 колбой ✓</span>`
       : '';
     status.innerHTML =
-      `${exact} · попыток: ${meta.attempts} (решаемых: ${meta.solvableAttempts}) · ${formatSec(meta.elapsedMs)}${easyTag}`;
+      `${exact} · попыток: ${meta.attempts} (подошли: ${meta.solvableAttempts}) · ${formatSec(meta.elapsedMs)}${bonusTag}`;
   }
 
   // --- JSON envelope ---
@@ -1936,14 +1909,11 @@ window.DevPanel = (() => {
         'Применить как baseline в Levels.DEFAULT_LEVELS внутри index.html. ' +
         'Для каждого ключа N в changes — заменить объект уровня N в Levels.DEFAULT_LEVELS ' +
         '(или ДОБАВИТЬ новый элемент, если N выходит за длину массива; ключи идут подряд от 1, ' +
-        'без пропусков) этими полями: sticks, capacity, emptyStick, reward, difficulty, colours, ' +
-        'generator, tuningTimeoutMs, seed, bottles. ' +
+        'без пропусков) этими полями: sticks, capacity, emptyStick, difficulty, colours, ' +
+        'generator, tuningTimeoutMs, seed, requireBonus, bottles. ' +
         'Поле bottles — кэш сгенерированной раскладки; кладётся в DEFAULT_LEVELS и используется ' +
         'напрямую при загрузке уровня (без вызова генератора). ' +
-        'Если bottles равен [[],[],[]] (или иначе содержит только пустые столбики) — это уровень-' +
-        'заготовка: пользователь добавил его кнопкой «+ Добавить», но не нажал «Сгенерировать». ' +
-        'Перед интеграцией нужно сгенерировать раскладку через random-tuned-генератор ' +
-        'или вернуть пользователю с просьбой нажать Сгенерировать.',
+        'Если bottles содержит только пустые столбики — это уровень-заготовка (нажми Сгенерировать).',
       changes: all,
     };
   }
