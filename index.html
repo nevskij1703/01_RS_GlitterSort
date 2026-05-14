@@ -1674,33 +1674,11 @@ window.Render = (() => {
         src.style.transform  = `translate(${flyDx}px, ${flyDy}px) rotate(${tiltDir}deg)`;
 
         setTimeout(() => {
-          // Шаг 3: момент «лить» — теперь пересобираем source и dst DOM
-          // под post-move состояние. До этого момента src показывал
-          // pre-move (со всеми слоями) — это и устраняет «слой исчезает
-          // в начале анимации» баг. Source перерисовываем с сохранением
-          // текущего transform/origin/transition, чтобы анимация
-          // не сбросилась.
-          const s = State.get();
-          const keepTransform   = src.style.transform;
-          const keepTransition  = src.style.transition;
-          const keepOrigin      = src.style.transformOrigin;
-          const newSrc = buildBottle(s.sticks[srcIdx], srcIdx, s.capacity);
-          newSrc.classList.add('pouring');
-          newSrc.style.transform       = keepTransform;
-          newSrc.style.transition      = keepTransition;
-          newSrc.style.transformOrigin = keepOrigin;
-          src.replaceWith(newSrc);
-          src = newSrc;
-
-          const newDst = buildBottle(s.sticks[dstIdx], dstIdx, s.capacity);
-          newDst.classList.add('receiving-bump');
-          dst.replaceWith(newDst);
-          dst = newDst;
-          // lastAdded потребляется уже текущим buildBottle (он навесил .is-new
-          // на свежие слои dst) — очищаем для следующих ходов.
-          if (s.lastAdded) s.lastAdded = null;
-
-          // Струйка
+          // Шаг 3: появляется струйка. Source ОСТАВЛЯЕМ pre-move
+          // (со всеми слоями) — он будет «выпускать» жидкость постепенно
+          // визуально, пока стрим течёт. Dst тоже пока pre-move — новый
+          // слой проявится в конце стрима.
+          dst.classList.add('receiving-bump');
           const stream = document.createElement('div');
           stream.className = 'pour-stream';
           stream.style.setProperty('--stream-color', `var(--c-${color}, var(--accent))`);
@@ -1714,11 +1692,33 @@ window.Render = (() => {
           stream.style.width  = '6px';
           document.body.appendChild(stream);
 
-          // Шаг 4: возврат
+          // Шаг 4: стрим завершается → теперь пересобираем src/dst в
+          // post-move. Source теряет верхние пере-литые слои, в dst
+          // появляются новые с .is-new.
           setTimeout(() => {
+            const s = State.get();
+            const keepTransform   = src.style.transform;
+            const keepTransition  = src.style.transition;
+            const keepOrigin      = src.style.transformOrigin;
+            const newSrc = buildBottle(s.sticks[srcIdx], srcIdx, s.capacity);
+            newSrc.classList.add('pouring');
+            newSrc.style.transform       = keepTransform;
+            newSrc.style.transition      = keepTransition;
+            newSrc.style.transformOrigin = keepOrigin;
+            src.replaceWith(newSrc);
+            src = newSrc;
+
+            const newDst = buildBottle(s.sticks[dstIdx], dstIdx, s.capacity);
+            newDst.classList.add('receiving-bump');
+            dst.replaceWith(newDst);
+            dst = newDst;
+            if (s.lastAdded) s.lastAdded = null;
+
+            stream.remove();
+
+            // Шаг 5: возврат — сначала наклон → 0, затем translate → 0
             src.style.transition = 'transform .18s ease';
             src.style.transform  = `translate(${flyDx}px, ${flyDy}px)`;
-            stream.remove();
             setTimeout(() => {
               src.style.transition = 'transform .3s cubic-bezier(.4,0,.25,1)';
               src.style.transform  = '';
