@@ -316,31 +316,49 @@ body{
    растворяться сразу после клика. Все живые анимации слоёв теперь — выше:
    .bottle svg rect.layer.is-new + @keyframes layerFill.) */
 
-/* ===== BOTTOM BAR ===== */
+/* ===== BOTTOM BAR =====
+   Только одна кнопка («Ход назад»), выровнена по левому краю экрана. */
 .bottom{
   flex:0 0 auto;
   display:flex;
   gap:10px;
-  padding:10px 14px 18px;
+  padding:10px 18px 18px;
   align-items:center;
-  justify-content:center;
+  justify-content:flex-start;
 }
 .btn{
-  display:inline-flex;align-items:center;justify-content:center;gap:6px;
+  display:inline-flex;align-items:center;justify-content:center;gap:10px;
   min-width:64px;height:56px;
-  padding:0 16px;
+  padding:0 18px;
   background:var(--panel);
   border:1px solid var(--panel-border);
   border-radius:16px;
   color:var(--text);
   font-family:inherit;font-size:14px;
+  line-height:1;
   cursor:pointer;
   transition:transform .1s, background .15s, border-color .15s;
   box-shadow:0 4px 10px rgba(0,0,0,.25);
 }
 .btn:active{transform:translateY(2px)}
 .btn[disabled]{opacity:.4;cursor:not-allowed}
-.btn .ico{width:24px;height:24px;display:inline-block}
+/* Иконка — flex-контейнер с центрированной SVG. Так glyph/SVG всегда
+   точно по центру, а текст рядом сидит на той же воображаемой средней
+   линии (line-height:1 у кнопки и justify-content:center у иконки). */
+.btn .ico{
+  width:22px;height:22px;
+  display:inline-flex;align-items:center;justify-content:center;
+  flex:0 0 auto;
+}
+.btn .ico svg{width:100%;height:100%;display:block}
+.btn .btn-label{display:inline-flex;align-items:center;line-height:1}
+/* Кнопка «Ход назад» — пошире, текст крупнее. */
+.btn-undo{
+  min-width:140px;
+  padding:0 22px;
+  font-size:15px;
+  letter-spacing:.2px;
+}
 .btn-primary{background:linear-gradient(180deg,#ff7ac6,#b65bff);border-color:rgba(255,255,255,.3)}
 .btn-bonus{background:linear-gradient(180deg,#ffd23f,#ff8a2b);color:#3b1300;border-color:#ffb44e}
 .btn-bonus .ico-play{color:#3b1300}
@@ -482,13 +500,14 @@ body{
   </div>
 
   <div class="bottom">
-    <button class="btn" id="btn-undo" aria-label="Ход назад" title="Ход назад">
-      <span class="ico">↶</span>
-      <span>Назад</span>
-    </button>
-    <button class="btn" id="btn-restart" aria-label="Заново" title="Заново">
-      <span class="ico">↻</span>
-      <span>Заново</span>
+    <button class="btn btn-undo" id="btn-undo" aria-label="Ход назад" title="Ход назад">
+      <span class="ico" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M9 14L4 9l5-5"/>
+          <path d="M20 20v-7a4 4 0 0 0-4-4H4"/>
+        </svg>
+      </span>
+      <span class="btn-label">Ход назад</span>
     </button>
   </div>
 </div>
@@ -2606,7 +2625,7 @@ window.App = (() => {
 
   // ===== Интерстишл политика =====
   // 1) Показываем только после прохождения 5+ уровня
-  // 2) Только если игрок «дёргал» уровень (undo / restart / +колба)
+  // 2) Только если игрок «дёргал» уровень (undo / +колба за рекламу)
   // 3) Cooldown 2 мин между показами; cooldown сбрасывается при перезапуске
   //    приложения (хранится в памяти, не в localStorage)
   // 4) Если предыдущий показ не успел зарезолвиться (закрыл приложение),
@@ -2736,7 +2755,6 @@ window.App = (() => {
     });
 
     document.getElementById('btn-undo').addEventListener('click', onUndo);
-    document.getElementById('btn-restart').addEventListener('click', onRestart);
     document.getElementById('btn-next').addEventListener('click', onNext);
 
     // 5-кратный тап по заголовку «Уровень N» открывает дев-панель.
@@ -2789,13 +2807,6 @@ window.App = (() => {
     Persist.save(persisted);
     flagInterstitialTrigger();
     Render.renderAll();
-  }
-
-  function onRestart() {
-    State.restart();
-    flagInterstitialTrigger();
-    Render.renderAll();
-    Render.toast('Уровень перезапущен');
   }
 
   function onWin() {
