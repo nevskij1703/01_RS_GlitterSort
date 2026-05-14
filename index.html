@@ -63,42 +63,54 @@ body{
 
 /* (header убран — счётчик ходов скрыт) */
 
-/* ===== LEVEL TITLE (большие буквы по середине + сложность) ===== */
+/* ===== LEVEL TITLE — центрирован между верхом экрана и верхом колб.
+   Растягивается через flex:1 0 auto и центрирует текст по вертикали. */
 .level-title{
-  flex:0 0 auto;
-  display:flex;flex-direction:column;align-items:center;
-  padding:8px 16px 6px;
+  flex:1 0 auto;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  padding:clamp(16px, 4vh, 40px) 16px;
   text-align:center;
+  gap:10px;
 }
 .level-title .lt-name{
   font-size:clamp(40px, 10vw, 64px);
-  font-weight:400;
-  letter-spacing:1.6px;
+  font-weight:900;
+  letter-spacing:2px;
   color:var(--text);
   text-transform:uppercase;
-  text-shadow:0 4px 18px rgba(0,0,0,.5), 0 0 28px rgba(255,216,107,.2);
   line-height:1;
   cursor:default;
   user-select:none;
   -webkit-user-select:none;
+  /* Утолщение текста: обводка под заливкой (paint-order). */
+  -webkit-text-stroke:2.5px var(--text);
+  paint-order:stroke fill;
+  text-shadow:0 4px 18px rgba(0,0,0,.55), 0 0 28px rgba(255,216,107,.2);
 }
-.level-title .lt-name b{color:var(--accent);font-weight:400}
+.level-title .lt-name b{
+  color:var(--accent);
+  font-weight:900;
+  -webkit-text-stroke:2.5px var(--accent);
+  paint-order:stroke fill;
+}
 .level-title .lt-diff{
-  margin-top:8px;
   font-size:26px;
+  font-weight:900;
   color:var(--diff-color, var(--text-dim));
-  letter-spacing:1px;
-  text-shadow:0 2px 10px rgba(0,0,0,.4);
-  transition:color .2s ease;
+  letter-spacing:1.2px;
+  -webkit-text-stroke:2px var(--diff-color, var(--text-dim));
+  paint-order:stroke fill;
+  text-shadow:0 2px 10px rgba(0,0,0,.45);
+  transition:color .2s ease, -webkit-text-stroke-color .2s ease;
 }
 
 /* ===== PLAYFIELD ===== */
 .field{
-  flex:1 1 auto;
+  flex:0 0 auto;
   display:flex;
   align-items:center;
   justify-content:center;
-  padding:8px;
+  padding:8px 8px 16px;
   position:relative;
   overflow:hidden;
 }
@@ -1625,6 +1637,8 @@ window.Render = (() => {
       const d = getDifficulty(s.sticks.length, s.capacity);
       $hudDiff.textContent = d.name;
       $hudDiff.style.setProperty('--diff-color', d.color);
+      // text-stroke не наследует currentColor: задаём явно через стиль.
+      $hudDiff.style.webkitTextStrokeColor = d.color;
     }
   }
 
