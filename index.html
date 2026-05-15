@@ -1777,6 +1777,15 @@ window.Render = (() => {
     return `b${idx}|${stack.join(',')}|c${completed?1:0}|s${selected?1:0}`;
   }
 
+  // ===== Параллельные переливы =====
+  // busyBottles — индексы колб, которые сейчас в активной анимации
+  // перелива (animatePour). Используется чтобы:
+  //   - App.onStickClick игнорировал клики по таким колбам;
+  //   - renderAll пропускал их при reconcile (анимация управляет их DOM,
+  //     renderAll не должен заменять элементы посреди анимации).
+  const busyBottles = new Set();
+  function isBusyBottle(idx) { return busyBottles.has(idx); }
+
   function renderAll() {
     const s = State.get();
     if (!s) return;
@@ -1797,11 +1806,15 @@ window.Render = (() => {
 
     // Reconcile: проходим по существующим детям и сверяем ключи.
     // Совпал — не трогаем. Не совпал — заменяем. Если детей меньше — добавляем.
+    // ВАЖНО: пропускаем колбы, которые сейчас в анимации перелива
+    // (busyBottles). Анимация владеет их DOM до своего завершения;
+    // renderAll не должен подменять элемент посреди жеста.
     const existing = Array.from($sticks.children);
     for (let i = 0; i < desired.length; i++) {
       const want = desired[i];
       const have = existing[i];
       if (have && have.dataset.key === want.key) continue;
+      if (want.kind === 'bottle' && busyBottles.has(want.idx)) continue;
       const el = want.kind === 'add'
         ? buildAddBottle(s.capacity)
         : buildBottle(want.stack, want.idx, s.capacity);
@@ -1891,7 +1904,14 @@ window.Render = (() => {
   // Перекрытие слоёв — устранят тонкие фоновые полоски между ними.
   const LAYER_OVERLAP = 24;
 
-  function buildBottle(stack, idx, capacity) {
+  /**
+   * @param lastAddedOverride — необязательный «свой» last-added для
+   * animatePour. При параллельных переливах state.lastAdded может уже
+   * указывать на чужой перелив; чтобы наш newDst корректно подсветил
+   * именно НАШИ свежие слои, animatePour ловит lastAdded в момент старта
+   * и передаёт сюда. renderAll такой параметр не передаёт.
+   */
+  function buildBottle(stack, idx, capacity, lastAddedOverride) {
     const s = State.get();
     const el = document.createElement('div');
     el.className = 'bottle';
@@ -1905,7 +1925,7 @@ window.Render = (() => {
     el.dataset.key = bottleKey(stack, idx, completed, isSelected);
 
     const layerH = LIQ_RANGE / capacity;
-    const lastAdded = s.lastAdded;
+    const lastAdded = lastAddedOverride !== undefined ? lastAddedOverride : s.lastAdded;
     const newCount = (lastAdded && lastAdded.idx === idx) ? lastAdded.count : 0;
     // Длительность одного fill-кадра в секундах — синхронизируем с CSS
     // (.bottle svg rect.layer.is-new { animation: layerFill .32s }).
@@ -2062,6 +2082,21 @@ window.Render = (() => {
       let dst = $sticks.children[dstIdx];
       if (!src || !dst) { resolve(); return; }
 
+      // Захват lastAdded ЗДЕСЬ, синхронно — чтобы параллельный перелив
+      // не успел перезаписать state.lastAdded на свой dst до того, как
+      // мы соберём newDst в фазе B. При повторных кликах после нашего
+      // вызова state.lastAdded мог стать чужим — мы сохраним свой.
+      const st0 = State.get();
+      const capturedLastAdded = (st0 && st0.lastAdded && st0.lastAdded.idx === dstIdx)
+        ? { ...st0.lastAdded }
+        : null;
+
+      // Помечаем обе колбы как занятые: App.onStickClick игнорирует клики
+      // по таким колбам, renderAll не пересобирает их DOM. Снимем флаг
+      // на самом конце (в финальном resolve), уже после фазы C.
+      busyBottles.add(srcIdx);
+      busyBottles.add(dstIdx);
+
       const srcRect = src.getBoundingClientRect();
       const dstRect = dst.getBoundingClientRect();
       const srcNeckX = srcRect.left + srcRect.width / 2;
@@ -2078,10 +2113,7 @@ window.Render = (() => {
       const flyDy = (dstNeckY - srcNeckY) - verticalClearance;
       const tiltDir = (dstNeckX >= srcNeckX) ? 70 : -70;
 
-      // Сколько слоёв переливаем — стрим и хвост анимации зависят от этого.
-      const st0 = State.get();
-      const layerCount = (st0 && st0.lastAdded && st0.lastAdded.idx === dstIdx)
-        ? Math.max(1, st0.lastAdded.count) : 1;
+      const layerCount = capturedLastAdded ? Math.max(1, capturedLastAdded.count) : 1;
       const LAYER_FILL_MS = 320;   // sync с CSS .layer.is-new { animation: layerFill .32s }
       // Стрим живёт ровно столько, сколько идёт последовательное заполнение
       // всех новых слоёв в приёмнике (плюс пара кадров на хвост). Минимум
@@ -2090,6 +2122,13 @@ window.Render = (() => {
 
       const FORWARD_MS = 400; // подлёт + наклон в один жест
       const RETURN_MS  = 400; // зеркальный возврат
+
+      // Финальная очистка — снять флаги «занято» и резолвнуть промис.
+      const finalize = () => {
+        busyBottles.delete(srcIdx);
+        busyBottles.delete(dstIdx);
+        resolve();
+      };
 
       src.classList.add('pouring');
       src.style.transformOrigin = '50% 4%';
@@ -2102,18 +2141,14 @@ window.Render = (() => {
         // Фаза B: стрим + bump.
         // Сразу пересобираем DST в post-move state — новые слои с .is-new
         // начнут заполняться последовательно (через inline animation-delay,
-        // см. buildBottle). Это важно: для мульти-перелива надо чтобы каждый
-        // слой успел дорасти до следующего БЕЗ разрывов в анимации.
-        // SRC оставляем pre-move до конца стрима — он визуально «отдаёт»
-        // жидкость, а не теряет слои мгновенно.
+        // см. buildBottle). Передаём capturedLastAdded — иначе параллельный
+        // перелив, перезаписавший state.lastAdded, отнял бы у нас разметку
+        // новых слоёв.
         const s = State.get();
-        const newDst = buildBottle(s.sticks[dstIdx], dstIdx, s.capacity);
+        const newDst = buildBottle(s.sticks[dstIdx], dstIdx, s.capacity, capturedLastAdded);
         newDst.classList.add('receiving-bump');
         dst.replaceWith(newDst);
         dst = newDst;
-        // Запоминаем lastAdded'ом был ли это тот же dst — он скоро понадобится
-        // при rebuild'е src (там lastAdded должен быть очищен, чтобы newSrc
-        // не пытался применить .is-new). Делаем clear ниже, после src rebuild.
 
         const stream = document.createElement('div');
         stream.className = 'pour-stream';
@@ -2136,7 +2171,8 @@ window.Render = (() => {
           const keepTransform   = src.style.transform;
           const keepTransition  = src.style.transition;
           const keepOrigin      = src.style.transformOrigin;
-          const newSrc = buildBottle(s.sticks[srcIdx], srcIdx, s.capacity);
+          // newSrc — собираем БЕЗ override (он src, у него нет «новых» слоёв).
+          const newSrc = buildBottle(s.sticks[srcIdx], srcIdx, s.capacity, null);
           newSrc.classList.add('pouring');
           newSrc.style.transform       = keepTransform;
           newSrc.style.transition      = keepTransition;
@@ -2144,7 +2180,10 @@ window.Render = (() => {
           src.replaceWith(newSrc);
           src = newSrc;
 
-          if (s.lastAdded) s.lastAdded = null;
+          // Чистим state.lastAdded ТОЛЬКО если он всё ещё указывает на нас.
+          // Параллельный перелив мог перетереть на свой dst — тогда оставим,
+          // чужой animatePour сам очистит в конце своего цикла.
+          if (s.lastAdded && s.lastAdded.idx === dstIdx) s.lastAdded = null;
           stream.remove();
 
           // Фаза C: возврат translate + un-rotate ОДНОВРЕМЕННО.
@@ -2155,7 +2194,7 @@ window.Render = (() => {
             dst.classList.remove('receiving-bump');
             src.style.transition = '';
             src.style.transformOrigin = '';
-            resolve();
+            finalize();
           }, RETURN_MS);
         }, streamMs);
       }, FORWARD_MS);
@@ -2182,7 +2221,7 @@ window.Render = (() => {
   }
 
   return { renderAll, renderHud, renderActionButtons, showWin, hideWin, toast,
-           animatePour, getDifficulty, showRateUs, hideRateUs };
+           animatePour, getDifficulty, showRateUs, hideRateUs, isBusyBottle };
 })();
 
 /* ============================================================
@@ -2956,7 +2995,13 @@ window.Tutorial = (() => {
    ============================================================ */
 window.App = (() => {
   let session = null;       // { levelNum, params }
-  let transferLocked = false;
+  // winLocked — глобальный замок, который активен ТОЛЬКО когда открыт
+  // модал победы. Запрещает любые клики по полю до нажатия «Дальше».
+  // Анимация перелива больше не блокирует поле: Render.isBusyBottle()
+  // выставляет per-колбу-флаг, и onStickClick игнорирует только клики
+  // по тем колбам, которые сейчас участвуют в активной анимации. Это
+  // позволяет запускать переливы параллельно (на разных парах колб).
+  let winLocked = false;
   // Счётчик пройденных уровней ИМЕННО в этой игровой сессии (in-memory,
   // на reload сбрасывается). Используется для триггера Rate-us перед
   // 2-м уровнем сессии.
@@ -3197,34 +3242,36 @@ window.App = (() => {
     });
   }
 
-  async function onStickClick(idx) {
-    if (transferLocked) return;
+  function onStickClick(idx) {
+    if (winLocked) return;
+    // Если по этой колбе сейчас идёт анимация перелива — игнорируем.
+    if (Render.isBusyBottle && Render.isBusyBottle(idx)) return;
     const prev = State.get();
     const prevSelected = prev ? prev.selected : null;
+    // Если у нас уже выбрана колба, но она почему-то стала «занята»
+    // (например, успела войти в параллельный перелив — крайне редкий
+    // race) — тоже выходим, иначе начнём move с уезжающей колбы.
+    if (prevSelected != null && Render.isBusyBottle && Render.isBusyBottle(prevSelected)) return;
     const prevTopColor = prev && prevSelected !== null && prev.sticks[prevSelected].length
       ? prev.sticks[prevSelected][prev.sticks[prevSelected].length - 1]
       : null;
     const result = State.clickStick(idx);
     if (result === 'invalid') return;
     if (result === 'moved' && prevSelected !== null && prevTopColor) {
-      // Не рендерим сразу — оставляем pre-move DOM (источник со всеми
-      // слоями). animatePour сам перерисует src/dst колбы на post-move
-      // состояние в нужный момент (когда из горлышка начинает литься).
-      transferLocked = true;
-      try { await Render.animatePour(prevSelected, idx, prevTopColor); }
-      finally { transferLocked = false; }
-      Render.renderAll(); // финальный полный rerender — подстраховка
-      snapshotRun(); // сохраняем поле + историю после удачного хода
-      // Туториальная рука может теперь указать на следующий шаг — но
-      // только ПОСЛЕ анимации перелива, чтобы не появлялась посреди.
-      if (window.Tutorial) Tutorial.notifyPlayerActed();
-      if (State.isWon()) onWin();
+      // Запускаем анимацию НЕ блокирующе — пока она крутится, игрок может
+      // тапнуть другие (не занятые) колбы и начать ещё один перелив.
+      // animatePour сама добавляет src/dst в busyBottles и снимает в конце.
+      Render.animatePour(prevSelected, idx, prevTopColor).then(() => {
+        Render.renderAll(); // финальный полный rerender — подстраховка
+        snapshotRun();      // сохраняем поле + историю после удачного хода
+        if (window.Tutorial) Tutorial.notifyPlayerActed();
+        if (State.isWon()) onWin();
+      });
       return;
     }
     Render.renderAll(); // selected/deselected/switched/locked
     // Для нон-moved результатов туториал реагирует сразу.
     if (window.Tutorial) Tutorial.notifyPlayerActed();
-    return;
   }
 
   function onUndo() {
@@ -3241,7 +3288,7 @@ window.App = (() => {
 
   function onWin() {
     const s = State.get();
-    transferLocked = true;
+    winLocked = true; // блокируем поле пока открыт модал победы
     const persisted = Persist.load();
     persisted.totalCompleted = (persisted.totalCompleted || 0) + 1;
     persisted.stats.totalMoves = (persisted.stats.totalMoves || 0) + (s ? s.moves : 0);
@@ -3325,7 +3372,7 @@ window.App = (() => {
   }
 
   function onNext() {
-    transferLocked = false;
+    winLocked = false; // модал победы закрывается, можно снова трогать поле
     // Между уровнями дев-панель закрываем — она для редактирования
     // конкретного уровня и не должна болтаться через переход.
     if (window.DevPanel) DevPanel.close();
