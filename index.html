@@ -401,6 +401,43 @@ body{
 .modal p{color:var(--text-dim);margin-bottom:20px;font-size:14px;line-height:1.5}
 .modal .btn{width:100%;height:54px;font-size:16px}
 
+/* ===== RATE-US MODAL ===== */
+.rateus-modal h2{margin-bottom:12px}
+.rateus-stars{
+  font-size:44px;
+  color:#ffd23f;
+  letter-spacing:6px;
+  line-height:1;
+  margin:6px 0 16px;
+  text-shadow:0 4px 18px rgba(255,210,80,.55), 0 0 30px rgba(255,210,80,.25);
+}
+.rateus-text{
+  color:var(--text-dim);
+  font-size:15px;
+  line-height:1.5;
+  margin-bottom:22px;
+}
+.rateus-highlight{
+  color:#ffd23f;
+  font-weight:700;
+  letter-spacing:.3px;
+}
+/* Текстовая «кнопка-ссылка» без подложки — для «Может позже». */
+.btn-link{
+  background:none;
+  border:none;
+  color:rgba(255,255,255,.5);
+  font-family:inherit;
+  font-size:13px;
+  margin-top:12px;
+  padding:8px 14px;
+  cursor:pointer;
+  transition:color .15s, transform .1s;
+  letter-spacing:.2px;
+}
+.btn-link:hover{color:rgba(255,255,255,.8)}
+.btn-link:active{transform:translateY(1px)}
+
 /* ===== DEV PANEL ===== */
 .dev{
   position:fixed;top:8px;left:8px;right:8px;bottom:8px;
@@ -533,6 +570,19 @@ body{
     <h2>Уровень пройден!</h2>
     <p id="win-text">Молодец! Готов к следующему?</p>
     <button class="btn btn-primary" id="btn-next">Дальше →</button>
+  </div>
+</div>
+
+<!-- Rate-us модалка. Показывается перед началом 2-го уровня сессии
+     (кроме 1-й сессии) и после прохождения L3 — пока игрок не кликнет
+     «Оценить» хотя бы раз. См. App.showRateUsIfNeeded. -->
+<div class="modal-wrap" id="rateus-modal">
+  <div class="modal rateus-modal">
+    <h2>Спасибо за помощь!</h2>
+    <div class="rateus-stars" aria-hidden="true">★★★★★</div>
+    <p class="rateus-text">Оценки <b class="rateus-highlight">5-звёзд</b> очень важны для развития нашего проекта!</p>
+    <button class="btn btn-primary" id="btn-rateus-rate">Оценить</button>
+    <button class="btn-link" id="btn-rateus-later">Может позже</button>
   </div>
 </div>
 
@@ -1364,6 +1414,12 @@ window.Persist = (() => {
     // в приложение восстанавливал поле и позволял делать «Ход назад» до
     // начала уровня. Очищается при победе.
     savedRun: null,
+    // RateUs: счётчик игровых сессий (App.start инкрементит); флаг что
+    // L3-триггер уже отстрелял (одноразовый); флаг что игрок нажал
+    // «Оценить» (после этого окно больше не показывается никогда).
+    sessionCount: 0,
+    rateUsShownAtL3: false,
+    rateUsCompleted: false,
   };
 
   function load() {
@@ -2092,6 +2148,11 @@ window.Render = (() => {
   }
   function hideWin() { $winModal.classList.remove('open'); }
 
+  // ===== Rate-us модалка =====
+  const $rateUsModal = document.getElementById('rateus-modal');
+  function showRateUs() { $rateUsModal.classList.add('open'); }
+  function hideRateUs() { $rateUsModal.classList.remove('open'); }
+
   let toastTimer = null;
   function toast(msg, ms = 1500) {
     $toast.textContent = msg;
@@ -2101,7 +2162,7 @@ window.Render = (() => {
   }
 
   return { renderAll, renderHud, renderActionButtons, showWin, hideWin, toast,
-           animatePour, getDifficulty };
+           animatePour, getDifficulty, showRateUs, hideRateUs };
 })();
 
 /* ============================================================
@@ -2863,6 +2924,12 @@ window.Tutorial = (() => {
 window.App = (() => {
   let session = null;       // { levelNum, params }
   let transferLocked = false;
+  // Счётчик пройденных уровней ИМЕННО в этой игровой сессии (in-memory,
+  // на reload сбрасывается). Используется для триггера Rate-us перед
+  // 2-м уровнем сессии.
+  let sessionCompletedCount = 0;
+  // Флаг "Rate-us уже показывался в этой сессии" — не показываем повторно.
+  let rateUsShownThisSession = false;
 
   // ===== Интерстишл политика =====
   // 1) Показываем только после прохождения 5+ уровня
@@ -2915,6 +2982,12 @@ window.App = (() => {
 
   async function start() {
     const persisted = Persist.load();
+    // Игровая сессия = запуск приложения. Инкрементим счётчик, чтобы
+    // отличить «первую сессию» (sessionCount=1) от последующих (>=2).
+    persisted.sessionCount = (persisted.sessionCount || 0) + 1;
+    Persist.save(persisted);
+    sessionCompletedCount = 0;
+    rateUsShownThisSession = false;
     await Ads.init().catch(() => {});
 
     // Recovery: если меньше 5 минут назад был неотданный интерстишл —
@@ -3146,12 +3219,76 @@ window.App = (() => {
     // сгенерирует новый.
     persisted.savedRun = null;
     Persist.save(persisted);
+    sessionCompletedCount++;
     // Прогреваем интерстишл на фоне, пока игрок читает модал — на native
     // wrapper preload идёт в его SDK, у нас он no-op для других backend'ов.
     if (window.Ads && Ads.preloadInterstitial) {
       try { Ads.preloadInterstitial(); } catch (_e) {}
     }
     Render.showWin(`Молодец! Готов к уровню ${persisted.level}?`);
+  }
+
+  // ===== Rate-us политика =====
+  // Показ окна Rate-us, если выполняется одно из условий:
+  //   (A) Только что пройден L3 (одноразовый триггер, persisted.rateUsShownAtL3).
+  //   (B) Это 2-й уровень в текущей сессии И сессия не первая.
+  // Никогда не показываем, если:
+  //   - игрок уже хоть раз нажал «Оценить» (persisted.rateUsCompleted);
+  //   - окно уже показывалось в этой сессии (rateUsShownThisSession).
+  function shouldShowRateUs(justCompletedLevel) {
+    if (rateUsShownThisSession) return false;
+    const persisted = Persist.load();
+    if (persisted.rateUsCompleted) return false;
+    const triggerL3 = justCompletedLevel === 3 && !persisted.rateUsShownAtL3;
+    const triggerSession = (persisted.sessionCount || 0) > 1
+                        && sessionCompletedCount === 1;
+    return triggerL3 || triggerSession;
+  }
+
+  /**
+   * Показывает Rate-us модалку и колбэкает после её закрытия. Кнопки:
+   *   - «Оценить»     → отмечаем rateUsCompleted=true (больше не показываем),
+   *                     открываем заглушку стора (window.open noop), callback.
+   *   - «Может позже» → просто закрываем, callback.
+   *
+   * Вызывается из onNext до проверки интерстишла. Тем самым обеспечивается
+   * порядок: Rate-us → (опционально) интерстишл → loadLevel. Никогда
+   * Rate-us не появляется ПОСЛЕ интерстишла.
+   */
+  function showRateUsThen(callback) {
+    rateUsShownThisSession = true;
+    const persisted = Persist.load();
+    // L3-триггер — одноразовый; помечаем сразу при показе.
+    const s = State.get();
+    if (s && s.level === 3) {
+      persisted.rateUsShownAtL3 = true;
+      Persist.save(persisted);
+    }
+    const onRate = () => {
+      detachRateUsHandlers();
+      const p = Persist.load();
+      p.rateUsCompleted = true;
+      Persist.save(p);
+      // Заглушка перехода в стор. В production-APK подменяется на
+      // window.open('market://details?id=...') или RuStore URL.
+      try { window.open('about:blank', '_blank'); } catch (_e) {}
+      Render.hideRateUs();
+      callback();
+    };
+    const onLater = () => {
+      detachRateUsHandlers();
+      Render.hideRateUs();
+      callback();
+    };
+    const btnRate = document.getElementById('btn-rateus-rate');
+    const btnLater = document.getElementById('btn-rateus-later');
+    btnRate.addEventListener('click', onRate);
+    btnLater.addEventListener('click', onLater);
+    function detachRateUsHandlers() {
+      btnRate.removeEventListener('click', onRate);
+      btnLater.removeEventListener('click', onLater);
+    }
+    Render.showRateUs();
   }
 
   function onNext() {
@@ -3164,10 +3301,20 @@ window.App = (() => {
     const flagged = !!(s && s.interstitialFlagged);
     const persisted = Persist.load();
     const nextLevel = persisted.level;
-    if (shouldShowInterstitialNow(justCompletedLevel, flagged)) {
-      presentInterstitialThenLoad(nextLevel);
+
+    // Цепочка: Rate-us (если пора) → интерстишл (если пора) → loadLevel.
+    // Rate-us ВСЕГДА ПЕРВЫМ, чтобы не показываться после рекламы.
+    const proceedAfterRateUs = () => {
+      if (shouldShowInterstitialNow(justCompletedLevel, flagged)) {
+        presentInterstitialThenLoad(nextLevel);
+      } else {
+        loadLevel(nextLevel);
+      }
+    };
+    if (shouldShowRateUs(justCompletedLevel)) {
+      showRateUsThen(proceedAfterRateUs);
     } else {
-      loadLevel(nextLevel);
+      proceedAfterRateUs();
     }
   }
 
