@@ -2331,12 +2331,14 @@ window.DevPanel = (() => {
 
     <h3>Сброс</h3>
     <div class="actions">
-      <button id="le-reset" class="danger">Reset L?</button>
-      <button id="le-reset-all" class="danger">Reset всё</button>
+      <button id="le-reset" class="danger">Сброс L?</button>
+      <button id="le-reset-all" class="danger">Сброс прогресса</button>
     </div>
     <p style="margin:4px 0 8px;color:var(--text-dim);font-size:11px;">
-      <b>Reset L?</b> — сброс runtime-правок текущего уровня.<br>
-      <b>Reset всё</b> — полный сброс localStorage (как при первом открытии).
+      <b>Сброс L?</b> — сброс runtime-правок текущего уровня.<br>
+      <b>Сброс прогресса</b> — полный сброс localStorage и reload игры
+      (как у нового игрока: L1, нет savedRun, нет сессий, туториал снова
+      активен, rate-us снова откроется, кулдауны рекламы сбросятся).
     </p>
 
     <h3>🧠 Симуляция (BFS)</h3>
@@ -2382,7 +2384,7 @@ window.DevPanel = (() => {
       b.classList.toggle('active', +b.dataset.lvl === editingLevel);
     });
     const reset = $('#le-reset');
-    if (reset) reset.textContent = `Reset L${editingLevel}`;
+    if (reset) reset.textContent = `Сброс L${editingLevel}`;
   }
 
   function wire() {
