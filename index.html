@@ -586,6 +586,7 @@ body{
   </div>
 </div>
 
+<!-- HTML2APK:DEV_ONLY -->
 <div class="dev" id="dev-panel">
   <div class="dev-head">
     <h3>🛠 Дев-панель уровня</h3>
@@ -595,6 +596,7 @@ body{
     <!-- Заполняется DevPanel.render() -->
   </div>
 </div>
+<!-- /HTML2APK:DEV_ONLY -->
 
 <div class="toast" id="toast"></div>
 
@@ -2224,8 +2226,12 @@ window.Render = (() => {
            animatePour, getDifficulty, showRateUs, hideRateUs, isBusyBottle };
 })();
 
+/* HTML2APK:DEV_ONLY */
 /* ============================================================
    [DEVPANEL] — редактор уровня + симуляция (BFS).
+   DEV-ONLY: всё содержимое блока (комментарий + IIFE) вырезается
+   в release-сборке через html2apk. В production юзер не сможет
+   попасть в редактор — нет ни UI, ни window.DevPanel.
    Перенесён из RC_Colbs_v2/game/cheats/tabLevelEditor.js.
    Toggle: ⚙ в шапке или Ctrl+Shift+D.
    Flow:
@@ -2798,6 +2804,7 @@ window.DevPanel = (() => {
 
   return { open, close, toggle, render };
 })();
+/* /HTML2APK:DEV_ONLY */
 
 
 /* ============================================================
@@ -3232,6 +3239,7 @@ window.App = (() => {
 
     // 5-кратный тап по заголовку «Уровень N» открывает дев-панель.
     // Кнопки шестерёнки больше нет — это скрытый вход для разработчика.
+    // HTML2APK:DEV_ONLY_BEGIN
     const lvlTap = document.getElementById('hud-level-tap');
     let tapCount = 0, tapTimer = null;
     if (lvlTap) lvlTap.addEventListener('click', () => {
@@ -3243,6 +3251,7 @@ window.App = (() => {
         DevPanel.open();
       }
     });
+    // HTML2APK:DEV_ONLY_END
   }
 
   function onStickClick(idx) {
@@ -3378,7 +3387,7 @@ window.App = (() => {
     winLocked = false; // модал победы закрывается, можно снова трогать поле
     // Между уровнями дев-панель закрываем — она для редактирования
     // конкретного уровня и не должна болтаться через переход.
-    if (window.DevPanel) DevPanel.close();
+    /* HTML2APK:DEV_ONLY */ if (window.DevPanel) DevPanel.close(); /* /HTML2APK:DEV_ONLY */
     const s = State.get();
     const justCompletedLevel = s ? s.level : 0;
     const flagged = !!(s && s.interstitialFlagged);
