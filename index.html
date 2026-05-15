@@ -1417,14 +1417,55 @@ window.State = (() => {
 })();
 
 /* ============================================================
+   [MIGRATIONS] — реестр миграций сейва (см. docs/SAVES.md).
+   Каждая миграция — чистая функция (state) => state, превращающая
+   сейв из версии (N-1) в N. getCurrentSchemaVersion() авто-выводится
+   из max(keys(migrations)).
+   ⚠️ После публикации НЕ меняй существующие миграции — добавляй сверху.
+   ============================================================ */
+window.Migrations = (() => {
+  const migrations = {
+    1: (state) => {
+      // v0 → v1: переход на schemaVersion-based миграционную систему.
+      // Удаляем legacy-поле `version` (это был авторский счётчик из
+      // ранних сборок, не количество миграций).
+      if ('version' in state) delete state.version;
+      return state;
+    },
+  };
+
+  function getCurrentSchemaVersion() {
+    const keys = Object.keys(migrations).map(Number);
+    return keys.length ? Math.max(...keys) : 1;
+  }
+
+  function runMigrations(state, fromVersion) {
+    const current = getCurrentSchemaVersion();
+    let v = (typeof fromVersion === 'number') ? fromVersion : 0;
+    while (v < current) {
+      const fn = migrations[v + 1];
+      if (typeof fn !== 'function') {
+        throw new Error(`[migrations] Missing migration ${v + 1} (target schemaVersion=${current})`);
+      }
+      state = fn(state);
+      v++;
+    }
+    return { state, schemaVersion: current };
+  }
+
+  return { migrations, getCurrentSchemaVersion, runMigrations };
+})();
+
+/* ============================================================
    [PERSIST] — localStorage save/load.
    Ключ "glitterSort.v1". Хранит уровень, статистику, кастомные
    уровни из дев-панели, счётчик interstitial.
+   Миграции — через window.Migrations (см. блок [MIGRATIONS] выше).
    ============================================================ */
 window.Persist = (() => {
   const KEY = 'glitterSort.v1';
   const DEFAULTS = {
-    version: 2,
+    schemaVersion: window.Migrations.getCurrentSchemaVersion(),
     level: 1,
     totalCompleted: 0,
     interstitialCounter: 0,
@@ -1449,13 +1490,42 @@ window.Persist = (() => {
       const raw = localStorage.getItem(KEY);
       if (!raw) return { ...DEFAULTS };
       const parsed = JSON.parse(raw);
-      // shallow merge с дефолтами на случай новых полей в будущих версиях
-      return {
-        ...DEFAULTS, ...parsed,
-        settings: { ...DEFAULTS.settings, ...(parsed.settings || {}) },
-        stats:    { ...DEFAULTS.stats,    ...(parsed.stats    || {}) },
-        customLevels: parsed.customLevels || {},
+      // fromVersion: schemaVersion есть → берём; нет → 0 (сейв до миграций).
+      // Legacy `version` поле НЕ используется как алиас (там был авторский
+      // счётчик, не количество миграций — см. migrations[1]).
+      const fromVersion = (typeof parsed.schemaVersion === 'number') ? parsed.schemaVersion : 0;
+      const target = window.Migrations.getCurrentSchemaVersion();
+
+      if (fromVersion > target) {
+        // Даунгрейд кода — сейв из будущего. Бэкап, дефолты.
+        console.warn(`[Persist] save schemaVersion=${fromVersion} > code=${target}, resetting`);
+        try { localStorage.setItem(`${KEY}_backup_future_v${fromVersion}`, raw); } catch (e) {}
+        const fresh = { ...DEFAULTS };
+        save(fresh);
+        return fresh;
+      }
+
+      let state = parsed;
+      if (fromVersion < target) {
+        const result = window.Migrations.runMigrations(parsed, fromVersion);
+        state = result.state;
+        state.schemaVersion = result.schemaVersion;
+      }
+
+      // shallow merge с дефолтами на случай новых полей (не помеченных миграцией).
+      const merged = {
+        ...DEFAULTS, ...state,
+        settings: { ...DEFAULTS.settings, ...(state.settings || {}) },
+        stats:    { ...DEFAULTS.stats,    ...(state.stats    || {}) },
+        customLevels: state.customLevels || {},
+        schemaVersion: target,
       };
+      // Сохраняем мигрированный/прибранный state обратно в localStorage.
+      if (fromVersion < target || 'version' in merged) {
+        if ('version' in merged) delete merged.version;
+        save(merged);
+      }
+      return merged;
     } catch (e) {
       console.warn('[Persist] load failed, using defaults', e);
       return { ...DEFAULTS };
