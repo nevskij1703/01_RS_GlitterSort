@@ -933,13 +933,28 @@ window.Levels = (() => {
   }
 
   /**
-   * Endless mode (L11+) — параметры зашиты в баланс игры по требованию
-   * пользователя:
-   *   - 8-12 колб случайно
+   * Endless mode (L11+) — параметры зашиты в баланс игры:
    *   - 1 пустая, capacity всегда 4
    *   - максимум оптимума линейно от 24 (8 колб) до 42 (12 колб)
-   *   - 1 из 3 уровней с requireBonus=true
+   *   - 50% / 35% / 15% распределение целевой сложности
+   *     (Средне / Сложно / Очень сложно). requireBonus НЕ генерируется —
+   *     все эндлесс-уровни решаемы без +1 колбы.
    *   - tuningTimeoutMs = 1000 (быстрая генерация)
+   *
+   * Алгоритм генерации:
+   *   1. Roll целевого tier'а по midRatio/hardRatio/extremeRatio.
+   *   2. Выбираем sticks так, чтобы maxOptimal(sticks) ≥ нижней границы
+   *      tier'а: для Средне sticks∈[8..12], для Сложно sticks∈[9..12],
+   *      для Очень сложно sticks∈[10..12]. Иначе генератор просто
+   *      физически не сможет дать нужный оптимум.
+   *   3. Выбираем target difficulty внутри диапазона tier'а
+   *      (но не больше maxOptimal этого числа колб).
+   *
+   * Если генератор за tuningTimeoutMs не дотянул до target —
+   * берём то, что получилось (best.optimalLength). Реальный лейбл
+   * сложности у игрока определяется по фактическому BFS-оптимуму
+   * через Render.getDifficulty(), а не по запрошенному target.
+   *
    * Конфиг детерминирован по n: один и тот же уровень = одни и те же
    * параметры. Bottles генерируются генератором и кэшируются в savedRun.
    */
@@ -954,25 +969,62 @@ window.Levels = (() => {
     optimalAt8: 24,
     optimalAt12: 42,
     tuningTimeoutMs: 1000,
-    bonusRatio: 1 / 3,  // 1 из 3 уровней решаемы только с +1 колбой
+    // Распределение целевой сложности (сумма == 1):
+    midRatio:     0.50,   // Средне: target 17..24
+    hardRatio:    0.35,   // Сложно: target 25..32
+    extremeRatio: 0.15,   // Очень сложно: target 33..maxOptimal
   };
 
   const _endlessCache = {};
+  // Шаги: возвращает maxOptimal для заданного числа колб (линейная
+  // интерполяция между optimalAt8 и optimalAt12). При sticks < 8 или > 12
+  // экстраполяция всё равно работает корректно — но мы клампим число
+  // колб в [sticksMin..sticksMax], так что это безопасно.
+  function _maxOptimalFor(sticks, cfg) {
+    const t = (sticks - 8) / (12 - 8);
+    return Math.round(cfg.optimalAt8 + t * (cfg.optimalAt12 - cfg.optimalAt8));
+  }
   function generateEndlessConfig(n) {
     const cfg = ENDLESS_CONFIG;
     const seed = (n * 9173 + 31) | 0;
     const rng = mulberry32(seed);
-    // Случайное число колб в [sticksMin..sticksMax].
-    const sticksRange = cfg.sticksMax - cfg.sticksMin + 1;
-    const sticks = cfg.sticksMin + Math.floor(rng() * sticksRange);
+
+    // 1. Roll целевого tier'а по распределению 50% / 35% / 15%.
+    const tierRoll = rng();
+    let tier;
+    if (tierRoll < cfg.midRatio)                       tier = 'mid';
+    else if (tierRoll < cfg.midRatio + cfg.hardRatio)  tier = 'hard';
+    else                                               tier = 'extreme';
+
+    // 2. Выбираем минимальное число колб, при котором этот tier
+    //    физически достижим (т.е. maxOptimal(sticks) ≥ нижней границы
+    //    диапазона tier'а — 17 / 25 / 33).
+    //    Текущая интерполяция (optimalAt8=24, optimalAt12=42):
+    //      sticks=8  → 24   (mid OK, hard нет, extreme нет)
+    //      sticks=9  → 28-29 (mid+hard OK, extreme нет)
+    //      sticks=10 → 33    (всё OK)
+    //      sticks=11 → 38
+    //      sticks=12 → 42
+    const sticksMinForTier = { mid: 8, hard: 9, extreme: 10 }[tier];
+    const sticksMaxForTier = cfg.sticksMax;
+    const sticksRange = sticksMaxForTier - sticksMinForTier + 1;
+    const sticks = sticksMinForTier + Math.floor(rng() * sticksRange);
     const filled = sticks - cfg.emptyStick;
-    // Линейная интерполяция: между optimalAt8 (8 колб) и optimalAt12 (12 колб).
-    const t = (sticks - 8) / (12 - 8);
-    const maxOptimal = Math.round(cfg.optimalAt8 + t * (cfg.optimalAt12 - cfg.optimalAt8));
-    // Цель — где-то «до максимума»: от 60% до 100% этого ориентира.
-    const minOptimal = Math.max(8, Math.round(maxOptimal * 0.6));
-    const difficulty = minOptimal + Math.floor(rng() * (maxOptimal - minOptimal + 1));
-    const requireBonus = rng() < cfg.bonusRatio;
+    const maxOptimal = _maxOptimalFor(sticks, cfg);
+
+    // 3. Выбираем target внутри диапазона tier'а (но не выше maxOptimal
+    //    для этого числа колб — иначе target теоретически недостижим).
+    const tierRanges = {
+      mid:     { min: 17, max: Math.min(24, maxOptimal) },
+      hard:    { min: 25, max: Math.min(32, maxOptimal) },
+      extreme: { min: 33, max: maxOptimal },
+    };
+    let range = tierRanges[tier];
+    // Защита от вырожденного диапазона (например, sticks=10, extreme:
+    // min=33, max=33 — единственное значение).
+    if (range.min > range.max) range = { min: range.max, max: range.max };
+    const difficulty = range.min + Math.floor(rng() * (range.max - range.min + 1));
+
     const colours = shuffleInPlace([...PALETTE], rng).slice(0, filled);
     return {
       sticks,
@@ -983,8 +1035,12 @@ window.Levels = (() => {
       generator: 'random-tuned',
       tuningTimeoutMs: cfg.tuningTimeoutMs,
       seed,
-      requireBonus,
+      requireBonus: false,   // в endless-уровнях requireBonus отключён —
+                             // все уровни решаемы без +1 колбы за рекламу.
       endless: true,
+      // Тeg тира — для логов/отладки; реальный лейбл игроку выводится
+      // через Render.getDifficulty(optimalSteps) уже по факту BFS.
+      targetTier: tier,
     };
   }
 
@@ -1812,23 +1868,30 @@ window.Render = (() => {
   const $toast    = document.getElementById('toast');
   const $undo     = document.getElementById('btn-undo');
 
-  // Сложность теперь — параметр УРОВНЯ, определяется в момент генерации:
-  //   - 4 ступени равномерно по оптимальному числу ходов BFS-решения;
-  //   - «Очень сложно» — только для уровней, сгенерированных с
-  //     требованием бонуса (Решаемо только при +1 колбе).
-  // Если решатель не уложился в timeout (level.optimalSteps === null),
-  // fallback'имся в «Сложно». Пороги ниже подобраны эмпирически на
-  // 10 default-уровнях + endless tier.
+  // Сложность — параметр УРОВНЯ, определяется по фактическому оптимуму
+  // BFS-решения. 5 ступеней:
+  //   ≤  8 — Очень просто
+  //   ≤ 16 — Просто
+  //   ≤ 24 — Средне
+  //   ≤ 32 — Сложно
+  //   >  32 — Очень сложно (Infinity)
+  // requireBonus (если кто-то выставил через дев-панель) форсит
+  // «Очень сложно» независимо от оптимума. В endless requireBonus
+  // больше не генерируется — все уровни решаемы.
+  // Если решатель не уложился в timeout (optimalSteps === null),
+  // fallback — «Сложно» (предпоследний tier): обычно это значит
+  // что поиск глубокий, но мы не пугаем «Очень сложно».
   const DIFF_TIERS = [
     { maxSteps:  8,       name:'Очень просто',  color:'#7be37b' },
     { maxSteps: 16,       name:'Просто',        color:'#c5e35b' },
-    { maxSteps: 26,       name:'Средне',        color:'#ffd23f' },
-    { maxSteps: Infinity, name:'Сложно',        color:'#ff8a2b' },
+    { maxSteps: 24,       name:'Средне',        color:'#ffd23f' },
+    { maxSteps: 32,       name:'Сложно',        color:'#ff8a2b' },
+    { maxSteps: Infinity, name:'Очень сложно',  color:'#ef3a5d' },
   ];
   const DIFF_REQUIRES_BONUS = { name:'Очень сложно', color:'#ef3a5d' };
   function getDifficulty(optimalSteps, requireBonus) {
     if (requireBonus) return DIFF_REQUIRES_BONUS;
-    if (optimalSteps == null) return DIFF_TIERS[DIFF_TIERS.length - 1]; // fallback: «Сложно»
+    if (optimalSteps == null) return DIFF_TIERS[DIFF_TIERS.length - 2]; // fallback: «Сложно»
     return DIFF_TIERS.find(t => optimalSteps <= t.maxSteps);
   }
 
@@ -3216,19 +3279,32 @@ window.App = (() => {
         sticks: bottles.map(s => [...s]),
       });
 
-      // Считаем сложность как мета-параметр УРОВНЯ (а не от размера поля).
-      // Если в params.requireBonus стоит true (уровень сгенерирован с
-      // требованием бонуса) — это сразу «Очень сложно». Иначе считаем
-      // оптимальное число ходов BFS-ом и кладём на state, чтобы renderHud
-      // мог отобразить tier'ом (см. getDifficulty).
+      // Считаем сложность как мета-параметр УРОВНЯ. Лейбл определяется
+      // по фактическому BFS-оптимуму через Render.getDifficulty(). Источник
+      // optimalSteps (приоритет сверху вниз):
+      //   1) savedMeta — кэш от дев-панели (Persist.loadGenMeta).
+      //   2) tuningMeta — мета, которую сам генератор random-tuned уже
+      //      посчитал в момент Levels.generate(). Это самый точный
+      //      источник — генератор там делает BFS на каждой попытке.
+      //   3) fallback — отдельный BFS с timeout=1500мс. Используется только
+      //      для legacy-уровней и V1 reverse-shuffle (он мету не считает).
+      // ВАЖНО: «Очень сложно» теперь определяется по optimalSteps > 32,
+      // а не по requireBonus. requireBonus в endless больше не выставляется,
+      // но если кто-то форсит его через дев-панель — getDifficulty всё
+      // равно сразу вернёт «Очень сложно».
       const s = State.get();
       s.requireBonus = params.requireBonus === true;
-      // Если у нас уже есть кэшированная мета (savedMeta от дев-панели) —
-      // берём optimalLength оттуда без повторного запуска BFS.
       const savedMeta = window.Persist && window.Persist.loadGenMeta
         ? window.Persist.loadGenMeta(levelNum) : null;
+      const tuningMeta = (window.Levels && Levels.getLastTuningMeta)
+        ? Levels.getLastTuningMeta() : null;
       if (savedMeta && Number.isFinite(savedMeta.optimalLength)) {
         s.optimalSteps = savedMeta.optimalLength;
+      } else if (tuningMeta && Number.isFinite(tuningMeta.optimalLength)) {
+        // Генератор random-tuned уже знает точный optimalLength раскладки.
+        // На extreme-уровнях (target ≥ 33) второй BFS с timeout=1500мс
+        // мог бы не уложиться и вернуть null — поэтому tuningMeta точнее.
+        s.optimalSteps = tuningMeta.optimalLength;
       } else {
         try {
           // Таймаут BFS подобран так, чтобы не тормозить переход уровня
