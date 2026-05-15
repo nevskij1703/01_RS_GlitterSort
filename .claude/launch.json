@@ -4,9 +4,9 @@
     {
       "name": "glitter-sort",
       "runtimeExecutable": "python",
-      "runtimeArgs": ["-m", "http.server", "--bind", "127.0.0.1"],
+      "runtimeArgs": ["-m", "http.server", "--bind", "127.0.0.1", "8771"],
       "port": 8771,
-      "autoPort": true
+      "autoPort": false
     }
   ]
 }

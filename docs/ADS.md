@@ -33,7 +33,7 @@ Unit-ID в коде:
 & "$env:LOCALAPPDATA\Programs\html2apk\html2apk.ps1" `
   -ProjectFolder "C:\Users\Александр\Desktop\Claude\01_RS_GlitterSort" `
   -AppName "GlitterSort" `
-  -AppId "com.matryoshka.glittersort" `
+  -AppId "com.terekh.glittersort" `
   -OutputFile "$env:USERPROFILE\Downloads\GlitterSort.apk" `
   -YandexAdsBridge
 ```
