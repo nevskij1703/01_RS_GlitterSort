@@ -804,43 +804,63 @@ window.Levels = (() => {
   // Каждый цвет занимает ровно ОДНУ полную колбу (capacity единиц).
   // Никогда не должно быть 2+ полных колб одного цвета.
   // Прогрессия — увеличение sticks/capacity/colors, всегда emptyStick=1.
-  // Прогрессия по требованию пользователя: оптимум от 3 ходов (L1) до 32 (L10).
-  // emptyStick=1, без requireBonus. random-tuned тюнит layout BFS-ом под exact
-  // difficulty (на старте может занять до tuningTimeoutMs мс — поэтому
-  // сохранение прогресса кэширует сгенерированные bottles в savedRun).
-  // L1 имеет жёстко зашитый bottles — для надёжности туториала.
+  // Прогрессия от 3 ходов (L1) до 31-32 ходов (L10), emptyStick=1, без бонуса.
+  // ВСЕ bottles предгенерированы и захардкожены — одинаковы у всех игроков,
+  // нет тяжёлой генерации на устройстве. Если когда-нибудь придётся
+  // регенерировать — generator/seed/difficulty/tuningTimeoutMs оставлены
+  // как метаданные, generate() их использует, только если bottles нет.
+  // Оптимум каждого уровня указан в комментарии (проверено BFS-solver).
   const DEFAULT_LEVELS = [
+    // L1 — туториал, optimal=3
     { level: 1,  sticks: 3,  capacity: 2, emptyStick: 1, difficulty: 3,
       colours: ['pink','blue'],
       generator:'random-tuned', tuningTimeoutMs: 3000, seed: 1001,
-      bottles: [['pink','blue'], ['blue','pink'], []] },
+      bottles: [['pink','blue'],['blue','pink'],[]] },
+    // L2 — optimal=4
     { level: 2,  sticks: 4,  capacity: 2, emptyStick: 1, difficulty: 6,
       colours: ['pink','blue','orange'],
-      generator:'random-tuned', tuningTimeoutMs: 3000, seed: 2001 },
+      generator:'random-tuned', tuningTimeoutMs: 3000, seed: 2001,
+      bottles: [['pink','orange'],['blue','pink'],['orange','blue'],[]] },
+    // L3 — optimal=8
     { level: 3,  sticks: 4,  capacity: 3, emptyStick: 1, difficulty: 9,
       colours: ['pink','blue','orange'],
-      generator:'random-tuned', tuningTimeoutMs: 4000, seed: 3001 },
+      generator:'random-tuned', tuningTimeoutMs: 4000, seed: 3001,
+      bottles: [['pink','blue','pink'],['orange','blue','orange'],['pink','blue','orange'],[]] },
+    // L4 — optimal=10
     { level: 4,  sticks: 5,  capacity: 3, emptyStick: 1, difficulty: 12,
       colours: ['pink','blue','orange','lime'],
-      generator:'random-tuned', tuningTimeoutMs: 4000, seed: 4001 },
+      generator:'random-tuned', tuningTimeoutMs: 4000, seed: 4001,
+      bottles: [['lime','orange','lime'],['pink','orange','blue'],['pink','lime','pink'],['blue','orange','blue'],[]] },
+    // L5 — optimal=13
     { level: 5,  sticks: 6,  capacity: 3, emptyStick: 1, difficulty: 15,
       colours: ['pink','orange','yellow','lime','teal'],
-      generator:'random-tuned', tuningTimeoutMs: 5000, seed: 5001 },
+      generator:'random-tuned', tuningTimeoutMs: 5000, seed: 5001,
+      bottles: [['lime','teal','yellow'],['yellow','orange','teal'],['yellow','orange','pink'],['teal','lime','pink'],['lime','orange','pink'],[]] },
+    // L6 — optimal=18
     { level: 6,  sticks: 7,  capacity: 4, emptyStick: 1, difficulty: 18,
       colours: ['pink','orange','yellow','lime','teal','blue'],
-      generator:'random-tuned', tuningTimeoutMs: 5000, seed: 6001 },
+      generator:'random-tuned', tuningTimeoutMs: 5000, seed: 6001,
+      bottles: [['pink','lime','yellow','lime'],['teal','blue','lime','orange'],['orange','pink','teal','yellow'],['blue','teal','pink','blue'],['teal','orange','orange','lime'],['yellow','pink','yellow','blue'],[]] },
+    // L7 — optimal=22
     { level: 7,  sticks: 8,  capacity: 4, emptyStick: 1, difficulty: 22,
       colours: ['pink','orange','yellow','lime','teal','blue','purple'],
-      generator:'random-tuned', tuningTimeoutMs: 6000, seed: 7001 },
+      generator:'random-tuned', tuningTimeoutMs: 6000, seed: 7001,
+      bottles: [['yellow','blue','teal','blue'],['lime','pink','blue','teal'],['lime','yellow','purple','pink'],['blue','teal','orange','pink'],['yellow','purple','yellow','teal'],['pink','lime','orange','purple'],['orange','orange','purple','lime'],[]] },
+    // L8 — optimal=25
     { level: 8,  sticks: 9,  capacity: 4, emptyStick: 1, difficulty: 25,
       colours: ['pink','orange','yellow','lime','teal','blue','purple','crimson'],
-      generator:'random-tuned', tuningTimeoutMs: 8000, seed: 8001 },
+      generator:'random-tuned', tuningTimeoutMs: 8000, seed: 8001,
+      bottles: [['pink','crimson','blue','lime'],['purple','pink','purple','crimson'],['orange','orange','yellow','orange'],['lime','lime','crimson','teal'],['purple','yellow','teal','teal'],['yellow','teal','blue','pink'],['lime','blue','pink','blue'],['crimson','purple','yellow','orange'],[]] },
+    // L9 — optimal=28
     { level: 9,  sticks: 10, capacity: 4, emptyStick: 1, difficulty: 28,
       colours: ['pink','orange','yellow','lime','teal','blue','purple','crimson','cyan'],
-      generator:'random-tuned', tuningTimeoutMs: 8000, seed: 9001 },
+      generator:'random-tuned', tuningTimeoutMs: 8000, seed: 9001,
+      bottles: [['pink','yellow','cyan','yellow'],['yellow','purple','teal','lime'],['cyan','teal','blue','purple'],['teal','blue','yellow','orange'],['lime','orange','lime','pink'],['orange','lime','crimson','teal'],['cyan','orange','purple','crimson'],['purple','crimson','pink','cyan'],['crimson','pink','blue','blue'],[]] },
+    // L10 — optimal=31 (целились в 32; BFS остановился на 31 за 10с)
     { level: 10, sticks: 12, capacity: 4, emptyStick: 1, difficulty: 32,
       colours: ['pink','orange','yellow','lime','teal','blue','purple','crimson','cyan','mint','coral'],
-      generator:'random-tuned', tuningTimeoutMs: 10000, seed: 10001 },
+      generator:'random-tuned', tuningTimeoutMs: 10000, seed: 10001,
+      bottles: [['yellow','teal','pink','lime'],['teal','crimson','teal','blue'],['pink','yellow','blue','blue'],['lime','purple','lime','purple'],['orange','orange','pink','coral'],['yellow','orange','yellow','blue'],['purple','coral','purple','crimson'],['coral','cyan','pink','mint'],['cyan','mint','crimson','teal'],['mint','cyan','cyan','orange'],['crimson','lime','coral','mint'],[]] },
   ];
 
   const runtimeOverrides = {};
@@ -2878,8 +2898,21 @@ window.Tutorial = (() => {
     bottle.classList.add('tutorial-pulse');
 
     const r = bottle.getBoundingClientRect();
-    $hand.style.left = (r.right - 14) + 'px';
-    $hand.style.top  = (r.top + r.height * 0.4) + 'px';
+    // 👆 — кончик пальца указывает ВВЕРХ. Чтобы он показывал НА колбу, рука
+    // должна находиться чуть ниже её, центр пальца — под центром колбы.
+    // В 48×48 emoji-боксе кончик пальца у Segoe UI / Apple Color Emoji
+    // ≈ (50%, 14%) от верх-лево. Высчитываем top-left так, чтобы кончик
+    // пальца попал точно в нижнюю кромку колбы.
+    const HAND_W = 48, HAND_H = 48;
+    const TIP_X_FRAC = 0.50;
+    const TIP_Y_FRAC = 0.14;
+    // Цель кончика пальца: чуть выше нижней кромки колбы, под её центром.
+    // Чуть выше (а не точно на кромке) — чтобы визуально палец «заходил»
+    // в колбу, а не висел снаружи.
+    const tipX = r.left + r.width / 2;
+    const tipY = r.bottom - r.height * 0.05;
+    $hand.style.left = (tipX - HAND_W * TIP_X_FRAC) + 'px';
+    $hand.style.top  = (tipY - HAND_H * TIP_Y_FRAC) + 'px';
     $hand.classList.add('show', 'tapping');
   }
 
