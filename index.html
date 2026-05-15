@@ -301,7 +301,7 @@ body{
   font-size:42px;
   filter:drop-shadow(0 4px 8px rgba(0,0,0,.5));
   transform-origin:30% 30%;
-  transition:left .4s ease, top .4s ease, opacity .25s;
+  transition:left .4s ease, top .4s ease, opacity .3s;
   opacity:0;
 }
 .tutorial-hand.show{opacity:1}
@@ -310,6 +310,19 @@ body{
   0%,100%{transform:scale(1) translateY(0)}
   35%{transform:scale(.78) translateY(6px)}
   60%{transform:scale(1.05) translateY(-2px)}
+}
+/* Tutorial highlight — мягкое жёлтое свечение вокруг колбы-цели, плюс
+   одиночный hop (подпрыгивание) при появлении руки. */
+.bottle.tutorial-target{
+  filter:drop-shadow(0 0 14px rgba(255,216,107,.6)) drop-shadow(0 4px 10px rgba(0,0,0,.5));
+}
+.bottle.tutorial-pulse{
+  animation:tutorialHop .55s cubic-bezier(.4,1.6,.5,1) 1;
+}
+@keyframes tutorialHop{
+  0%   { transform: translateY(0); }
+  40%  { transform: translateY(-12px); }
+  100% { transform: translateY(0); }
 }
 /* (Legacy CSS-div анимации удалены — они применялись к SVG rect.layer
    через :last-child и заставляли верхний слой источника медленно
@@ -741,37 +754,43 @@ window.Levels = (() => {
   // Каждый цвет занимает ровно ОДНУ полную колбу (capacity единиц).
   // Никогда не должно быть 2+ полных колб одного цвета.
   // Прогрессия — увеличение sticks/capacity/colors, всегда emptyStick=1.
+  // Прогрессия по требованию пользователя: оптимум от 3 ходов (L1) до 32 (L10).
+  // emptyStick=1, без requireBonus. random-tuned тюнит layout BFS-ом под exact
+  // difficulty (на старте может занять до tuningTimeoutMs мс — поэтому
+  // сохранение прогресса кэширует сгенерированные bottles в savedRun).
+  // L1 имеет жёстко зашитый bottles — для надёжности туториала.
   const DEFAULT_LEVELS = [
-    { level: 1,  sticks: 3,  capacity: 3, emptyStick: 1, difficulty: 5,
+    { level: 1,  sticks: 3,  capacity: 2, emptyStick: 1, difficulty: 3,
       colours: ['pink','blue'],
-      generator:'reverse-shuffle', seed: 1007 },
-    { level: 2,  sticks: 4,  capacity: 3, emptyStick: 1, difficulty: 8,
-      colours: ['pink','blue','lime'],
-      generator:'reverse-shuffle', seed: 2007 },
-    { level: 3,  sticks: 5,  capacity: 3, emptyStick: 1, difficulty: 11,
-      colours: ['pink','blue','lime','purple'],
-      generator:'reverse-shuffle', seed: 3007 },
-    { level: 4,  sticks: 6,  capacity: 3, emptyStick: 1, difficulty: 14,
-      colours: ['pink','orange','teal','purple','yellow'],
-      generator:'reverse-shuffle', seed: 4007 },
-    { level: 5,  sticks: 7,  capacity: 3, emptyStick: 1, difficulty: 16,
-      colours: ['pink','orange','yellow','lime','blue','crimson'],
-      generator:'reverse-shuffle', seed: 5007 },
-    { level: 6,  sticks: 8,  capacity: 3, emptyStick: 1, difficulty: 18,
+      generator:'random-tuned', tuningTimeoutMs: 3000, seed: 1001,
+      bottles: [['pink','blue'], ['blue','pink'], []] },
+    { level: 2,  sticks: 4,  capacity: 2, emptyStick: 1, difficulty: 6,
+      colours: ['pink','blue','orange'],
+      generator:'random-tuned', tuningTimeoutMs: 3000, seed: 2001 },
+    { level: 3,  sticks: 4,  capacity: 3, emptyStick: 1, difficulty: 9,
+      colours: ['pink','blue','orange'],
+      generator:'random-tuned', tuningTimeoutMs: 4000, seed: 3001 },
+    { level: 4,  sticks: 5,  capacity: 3, emptyStick: 1, difficulty: 12,
+      colours: ['pink','blue','orange','lime'],
+      generator:'random-tuned', tuningTimeoutMs: 4000, seed: 4001 },
+    { level: 5,  sticks: 6,  capacity: 3, emptyStick: 1, difficulty: 15,
+      colours: ['pink','orange','yellow','lime','teal'],
+      generator:'random-tuned', tuningTimeoutMs: 5000, seed: 5001 },
+    { level: 6,  sticks: 7,  capacity: 4, emptyStick: 1, difficulty: 18,
+      colours: ['pink','orange','yellow','lime','teal','blue'],
+      generator:'random-tuned', tuningTimeoutMs: 5000, seed: 6001 },
+    { level: 7,  sticks: 8,  capacity: 4, emptyStick: 1, difficulty: 22,
       colours: ['pink','orange','yellow','lime','teal','blue','purple'],
-      generator:'reverse-shuffle', seed: 6007 },
-    { level: 7,  sticks: 9,  capacity: 4, emptyStick: 1, difficulty: 22,
+      generator:'random-tuned', tuningTimeoutMs: 6000, seed: 7001 },
+    { level: 8,  sticks: 9,  capacity: 4, emptyStick: 1, difficulty: 25,
       colours: ['pink','orange','yellow','lime','teal','blue','purple','crimson'],
-      generator:'reverse-shuffle', seed: 7007 },
-    { level: 8,  sticks: 10, capacity: 4, emptyStick: 1, difficulty: 26,
+      generator:'random-tuned', tuningTimeoutMs: 8000, seed: 8001 },
+    { level: 9,  sticks: 10, capacity: 4, emptyStick: 1, difficulty: 28,
       colours: ['pink','orange','yellow','lime','teal','blue','purple','crimson','cyan'],
-      generator:'reverse-shuffle', seed: 8007 },
-    { level: 9,  sticks: 11, capacity: 4, emptyStick: 1, difficulty: 30,
-      colours: ['pink','orange','yellow','lime','teal','blue','purple','crimson','cyan','mint'],
-      generator:'reverse-shuffle', seed: 9007 },
-    { level: 10, sticks: 12, capacity: 4, emptyStick: 1, difficulty: 34,
+      generator:'random-tuned', tuningTimeoutMs: 8000, seed: 9001 },
+    { level: 10, sticks: 12, capacity: 4, emptyStick: 1, difficulty: 32,
       colours: ['pink','orange','yellow','lime','teal','blue','purple','crimson','cyan','mint','coral'],
-      generator:'reverse-shuffle', seed:10007 },
+      generator:'random-tuned', tuningTimeoutMs: 10000, seed: 10001 },
   ];
 
   const runtimeOverrides = {};
@@ -842,37 +861,57 @@ window.Levels = (() => {
   }
 
   /**
-   * Endless mode (L11+). Уровни процедурные. emptyStick всегда = 1,
-   * colors = filled = sticks - 1, каждый цвет занимает ровно 1 полную колбу.
-   * Сложность растёт через увеличение sticks/capacity и difficulty (число
-   * требуемых ходов в reverse-shuffle).
+   * Endless mode (L11+) — параметры зашиты в баланс игры по требованию
+   * пользователя:
+   *   - 8-12 колб случайно
+   *   - 1 пустая, capacity всегда 4
+   *   - максимум оптимума линейно от 24 (8 колб) до 42 (12 колб)
+   *   - 1 из 3 уровней с requireBonus=true
+   *   - tuningTimeoutMs = 1000 (быстрая генерация)
+   * Конфиг детерминирован по n: один и тот же уровень = одни и те же
+   * параметры. Bottles генерируются генератором и кэшируются в savedRun.
    */
-  const ENDLESS_TIERS = [
-    { sticks: 12, capacity: 4, emptyStick: 1, difficulty: 38 },
-    { sticks: 12, capacity: 4, emptyStick: 1, difficulty: 42 },
-    { sticks: 12, capacity: 4, emptyStick: 1, difficulty: 46 },
-    { sticks: 12, capacity: 4, emptyStick: 1, difficulty: 50 },
-  ];
+  const ENDLESS_CONFIG = {
+    sticksMin: 8,
+    sticksMax: 12,
+    capacity: 4,
+    emptyStick: 1,
+    // Линейная интерполяция максимального оптимума:
+    //   sticks=8  → up to 24
+    //   sticks=12 → up to 42
+    optimalAt8: 24,
+    optimalAt12: 42,
+    tuningTimeoutMs: 1000,
+    bonusRatio: 1 / 3,  // 1 из 3 уровней решаемы только с +1 колбой
+  };
 
   const _endlessCache = {};
   function generateEndlessConfig(n) {
-    const tierIdx = (n - DEFAULT_LEVELS.length - 1) % ENDLESS_TIERS.length;
-    const tier = ENDLESS_TIERS[tierIdx];
-    const filled = tier.sticks - tier.emptyStick;
-    // Берём ровно `filled` уникальных цветов из палитры (детерминированно
-    // по seed — иначе один и тот же N будет рисовать разные цвета между
-    // вызовами рендера).
-    const seed = (Math.random() * 1e9) | 0;
+    const cfg = ENDLESS_CONFIG;
+    const seed = (n * 9173 + 31) | 0;
     const rng = mulberry32(seed);
+    // Случайное число колб в [sticksMin..sticksMax].
+    const sticksRange = cfg.sticksMax - cfg.sticksMin + 1;
+    const sticks = cfg.sticksMin + Math.floor(rng() * sticksRange);
+    const filled = sticks - cfg.emptyStick;
+    // Линейная интерполяция: между optimalAt8 (8 колб) и optimalAt12 (12 колб).
+    const t = (sticks - 8) / (12 - 8);
+    const maxOptimal = Math.round(cfg.optimalAt8 + t * (cfg.optimalAt12 - cfg.optimalAt8));
+    // Цель — где-то «до максимума»: от 60% до 100% этого ориентира.
+    const minOptimal = Math.max(8, Math.round(maxOptimal * 0.6));
+    const difficulty = minOptimal + Math.floor(rng() * (maxOptimal - minOptimal + 1));
+    const requireBonus = rng() < cfg.bonusRatio;
     const colours = shuffleInPlace([...PALETTE], rng).slice(0, filled);
     return {
-      sticks: tier.sticks,
-      capacity: tier.capacity,
-      emptyStick: tier.emptyStick,
-      difficulty: tier.difficulty,
+      sticks,
+      capacity: cfg.capacity,
+      emptyStick: cfg.emptyStick,
+      difficulty,
       colours,
-      generator: 'reverse-shuffle',
+      generator: 'random-tuned',
+      tuningTimeoutMs: cfg.tuningTimeoutMs,
       seed,
+      requireBonus,
       endless: true,
     };
   }
@@ -1154,7 +1193,7 @@ window.Levels = (() => {
   function getLastTuningMeta() { return _lastTuningMeta; }
 
   return {
-    PALETTE, COLOR_HEX, DEFAULT_LEVELS, ENDLESS_TIERS,
+    PALETTE, COLOR_HEX, DEFAULT_LEVELS, ENDLESS_CONFIG,
     getParams, generate,
     generateRandomTuned, getLastTuningMeta,
     setRuntimeOverride, clearRuntimeOverride, getRuntimeOverride,
@@ -1313,13 +1352,18 @@ window.State = (() => {
 window.Persist = (() => {
   const KEY = 'glitterSort.v1';
   const DEFAULTS = {
-    version: 1,
+    version: 2,
     level: 1,
     totalCompleted: 0,
     interstitialCounter: 0,
     customLevels: {},        // {n: {sticks, capacity, ...}}
     settings: { sound: true },
     stats: { totalMoves: 0, undoUsed: 0, bonusUsed: 0 },
+    // savedRun — текущее состояние активного уровня. Хранит сгенерированную
+    // раскладку, текущее положение цветов и историю ходов, чтобы перезаход
+    // в приложение восстанавливал поле и позволял делать «Ход назад» до
+    // начала уровня. Очищается при победе.
+    savedRun: null,
   };
 
   function load() {
@@ -1398,6 +1442,40 @@ window.Persist = (() => {
     return data.interstitialPendingAt || 0;
   }
 
+  // savedRun — снэпшот текущего активного уровня. Содержит:
+  //   level         — номер уровня
+  //   params        — оригинальные параметры генерации (для L11+ — это и
+  //                   есть «балансовый» seed/sticks/diff/requireBonus)
+  //   initialBottles— начальное положение (для определения «уровень в
+  //                   исходном состоянии» — undo может крутить до сюда)
+  //   currentBottles— текущее положение цветов
+  //   history       — стек {src,dst,count,color} ходов от initial к current
+  //   moves         — счётчик пройденных ходов
+  //   bonusUsedThisLevel
+  //   interstitialFlagged — игрок дёргал уровень (для политики рекламы)
+  //   optimalSteps  — BFS-оптимум исходной раскладки (для HUD сложности)
+  //   requireBonus  — флаг "решаемо только с +1 колбой"
+  function saveSavedRun(run) {
+    const data = load();
+    data.savedRun = run;
+    save(data);
+  }
+  function loadSavedRun() {
+    const data = load();
+    return data.savedRun || null;
+  }
+  function clearSavedRun() {
+    const data = load();
+    data.savedRun = null;
+    save(data);
+  }
+  function updateSavedRun(patch) {
+    const data = load();
+    if (!data.savedRun) return;
+    data.savedRun = { ...data.savedRun, ...patch };
+    save(data);
+  }
+
   // Generator meta — отдельный ключ. Хранит "человеко-читаемое" резюме
   // последней генерации для каждого уровня (attempts/optimal/distance/…),
   // переживает Persist.clear() игрового прогресса.
@@ -1446,6 +1524,7 @@ window.Persist = (() => {
     loadGenMeta, saveGenMeta, shiftGenMeta,
     bumpInterstitialCounter, shouldShowInterstitial,
     markInterstitialPending, clearInterstitialPending, loadInterstitialPending,
+    saveSavedRun, loadSavedRun, clearSavedRun, updateSavedRun,
   };
 })();
 
@@ -2607,63 +2686,173 @@ window.DevPanel = (() => {
    первый ход и тыкает на колбу-источник → паузу → колбу-приёмник.
    После любого клика по полю — рука прячется навсегда.
    ============================================================ */
+/* ============================================================
+   [TUTORIAL] — пошаговая «рука» на L1 до самого конца уровня.
+   Поведение (ТЗ):
+   1. Появляется из прозрачности → указывает на колбу, из которой
+      МОЖНО перелить цвет. Колба слегка подсвечивается и единожды
+      подпрыгивает. Рука исчезает в прозрачность. Через 3 секунды
+      цикл повторяется до тех пор, пока игрок не тапнет эту колбу.
+   2. Когда игрок тапнул источник → рука начинает указывать на
+      колбу-приёмник.
+   3. Если игрок снимает выделение с источника — рука снова
+      указывает на источник.
+   4. Шаг за шагом ведёт игрока до завершения L1.
+   Активируется ТОЛЬКО на L1 у игрока с totalCompleted === 0.
+   ============================================================ */
 window.Tutorial = (() => {
   const $hand = document.getElementById('tutorial-hand');
   let active = false;
-  let cancelTimer = null;
-  let cycleTimer = null;
+  let holdTimer = null;
+  let waitTimer = null;
+  let currentTarget = null;          // {idx, kind: 'src'|'dst'}
+  const HAND_VISIBLE_MS = 1100;       // 1.1с показываем руку + pulse колбы
+  const GAP_BETWEEN_CYCLES_MS = 3000; // 3с между циклами (как в ТЗ)
+  const RE_EVAL_DELAY_MS = 40;        // ждём пока State/Render обновятся
 
   function maybeStart(levelNum) {
     cleanup();
+    active = false;
+    hideHand(); // на всякий случай чистим всё
     if (levelNum !== 1) return;
     const persisted = Persist.load();
-    // Активируем только если игрок свежий: 0 пройденных + 0 ходов.
+    // Запускаем только если ещё ни один уровень не пройден (= свежий игрок).
     if ((persisted.totalCompleted || 0) > 0) return;
-    if ((persisted.stats?.totalMoves || 0) > 0) return;
     const s = State.get();
     if (!s) return;
-    // Берём оптимальный первый ход BFS-решателем.
-    const sol = Solver.findShortestPath(s.sticks, s.capacity, 1500, { multiTransfer: true });
-    if (!sol.firstMove) return;
-    const { from, to } = sol.firstMove;
     active = true;
-    cycleOnce(from, to);
+    nextStep();
   }
 
-  function cycleOnce(from, to) {
+  /**
+   * Главная функция тура: смотрит текущее State и решает, на какую
+   * колбу указывать сейчас. Вызывается:
+   *   - при старте тура (maybeStart);
+   *   - после любого действия игрока (notifyPlayerActed).
+   * Если уровень пройден — останавливает тур.
+   */
+  function nextStep() {
     if (!active) return;
+    cleanup();
+    const s = State.get();
+    if (!s) { stop(); return; }
+    if (State.isWon && State.isWon()) { stop(); return; }
+
+    let target = null;
+    if (s.selected != null) {
+      // Игрок выбрал колбу — указываем на валидное место для слива.
+      const dst = findFirstValidDestination(s, s.selected);
+      if (dst != null) target = { idx: dst, kind: 'dst' };
+    }
+    if (!target) {
+      // selected пустой — указываем на колбу-источник из оптимального
+      // решения. Если решения нет (например, надо +1 колба) — останавливаем.
+      let firstMove = null;
+      try {
+        const sol = Solver.findShortestPath(s.sticks, s.capacity, 800, { multiTransfer: true });
+        if (sol && sol.firstMove) firstMove = sol.firstMove;
+      } catch (_e) {}
+      if (!firstMove) {
+        // Fallback: первый произвольный доступный ход.
+        firstMove = findAnyMove(s);
+      }
+      if (!firstMove) { stop(); return; }
+      target = { idx: firstMove.from, kind: 'src' };
+    }
+    currentTarget = target;
+    runCycle();
+  }
+
+  function findFirstValidDestination(s, srcIdx) {
+    const N = s.sticks.length;
+    for (let j = 0; j < N; j++) {
+      if (j === srcIdx) continue;
+      if (State.canMove && State.canMove(srcIdx, j)) return j;
+    }
+    return null;
+  }
+
+  function findAnyMove(s) {
+    const N = s.sticks.length;
+    for (let i = 0; i < N; i++) {
+      if (!s.sticks[i].length) continue;
+      for (let j = 0; j < N; j++) {
+        if (i === j) continue;
+        if (State.canMove && State.canMove(i, j)) return { from: i, to: j };
+      }
+    }
+    return null;
+  }
+
+  function runCycle() {
+    if (!active || !currentTarget) return;
+    showHandAtTarget();
+    holdTimer = setTimeout(() => {
+      hideHand();
+      // Ждём 3 секунды и повторяем цикл (на ту же цель, либо переоценим
+      // её перед запуском — состояние могло измениться без действий игрока,
+      // хотя обычно меняется только после клика).
+      waitTimer = setTimeout(() => {
+        // Свежий re-eval перед каждым повтором — если игрок не среагировал
+        // и cтранным образом изменилось состояние, возьмём новую цель.
+        nextStep();
+      }, GAP_BETWEEN_CYCLES_MS);
+    }, HAND_VISIBLE_MS);
+  }
+
+  function showHandAtTarget() {
+    if (!currentTarget) return;
     const sticksEl = document.getElementById('sticks');
     if (!sticksEl) return;
-    const src = sticksEl.children[from];
-    const dst = sticksEl.children[to];
-    if (!src || !dst) { stop(); return; }
-    moveHandTo(src);
-    cancelTimer = setTimeout(() => {
-      if (!active) return;
-      moveHandTo(dst);
-      cycleTimer = setTimeout(() => cycleOnce(from, to), 1300);
-    }, 1300);
-  }
+    const bottle = sticksEl.children[currentTarget.idx];
+    if (!bottle) return;
+    // Снимаем подсветку со всех — на случай если цель сменилась.
+    Array.from(sticksEl.children).forEach(b => {
+      b.classList.remove('tutorial-target', 'tutorial-pulse');
+    });
+    bottle.classList.add('tutorial-target');
+    // Принудительный reflow, чтобы CSS-анимация tutorialHop стартовала
+    // заново даже если класс висел в прошлом цикле.
+    void bottle.offsetWidth;
+    bottle.classList.add('tutorial-pulse');
 
-  function moveHandTo(bottleEl) {
-    const r = bottleEl.getBoundingClientRect();
-    // Рука появляется чуть правее-ниже горлышка колбы (имитация тапа).
+    const r = bottle.getBoundingClientRect();
     $hand.style.left = (r.right - 14) + 'px';
     $hand.style.top  = (r.top + r.height * 0.4) + 'px';
     $hand.classList.add('show', 'tapping');
   }
 
-  function stop() {
-    active = false;
+  function hideHand() {
     $hand.classList.remove('show', 'tapping');
-    cleanup();
-  }
-  function cleanup() {
-    if (cancelTimer) { clearTimeout(cancelTimer); cancelTimer = null; }
-    if (cycleTimer)  { clearTimeout(cycleTimer);  cycleTimer  = null; }
+    const sticksEl = document.getElementById('sticks');
+    if (sticksEl) {
+      Array.from(sticksEl.children).forEach(b => {
+        b.classList.remove('tutorial-target', 'tutorial-pulse');
+      });
+    }
   }
 
-  function notifyPlayerActed() { if (active) stop(); }
+  function stop() {
+    active = false;
+    hideHand();
+    cleanup();
+    currentTarget = null;
+  }
+
+  function cleanup() {
+    if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; }
+    if (waitTimer) { clearTimeout(waitTimer); waitTimer = null; }
+  }
+
+  // Зовётся из App.onStickClick после любого результата State.clickStick.
+  // Пересчитываем шаг с небольшой задержкой, чтобы State + DOM успели
+  // прийти в финальное состояние (особенно при пересборе колб в animatePour).
+  function notifyPlayerActed() {
+    if (!active) return;
+    cleanup();
+    hideHand();
+    setTimeout(() => nextStep(), RE_EVAL_DELAY_MS);
+  }
 
   return { maybeStart, notifyPlayerActed, stop };
 })();
@@ -2742,15 +2931,29 @@ window.App = (() => {
     wireEvents();
   }
 
-  // Помечает текущий уровень как «дёрганый» — игрок использовал откат,
-  // рестарт или бонусную колбу. По окончании уровня (onNext) это станет
-  // одним из условий показа интерстишла.
+  // Помечает текущий уровень как «дёрганый» — игрок использовал откат
+  // или бонусную колбу. По окончании уровня (onNext) это станет
+  // одним из условий показа интерстишла. snapshotRun сохранит флаг в LS,
+  // чтобы reload не сбросил его.
   function flagInterstitialTrigger() {
     const s = State.get();
-    if (s) s.interstitialFlagged = true;
+    if (s) {
+      s.interstitialFlagged = true;
+      // не зовём snapshotRun здесь — onUndo/onBonus уже сами зовут после.
+    }
   }
 
   function loadLevel(levelNum) {
+    // Сначала проверяем savedRun: если есть и он для этого же уровня —
+    // восстанавливаем поле, историю ходов и метаданные без новой генерации.
+    const savedRun = Persist.loadSavedRun();
+    if (savedRun && savedRun.level === levelNum
+        && Array.isArray(savedRun.currentBottles)
+        && Array.isArray(savedRun.initialBottles)) {
+      restoreFromSavedRun(savedRun);
+      return;
+    }
+
     const params = Levels.getParams(levelNum);
     Render.toast(`Уровень ${levelNum}: генерация...`, 600);
     // Генератор может быть тяжёлым на старших уровнях — даём UI отрендерить
@@ -2787,12 +2990,76 @@ window.App = (() => {
         }
       }
 
+      // Сохраняем стартовое состояние нового уровня — чтобы перезаход в
+      // приложение восстанавливал именно его, и чтобы undo мог откатиться
+      // до самого начала.
+      const initialCopy = bottles.map(b => [...b]);
+      Persist.saveSavedRun({
+        level: levelNum,
+        params,
+        initialBottles: initialCopy,
+        currentBottles: initialCopy.map(b => [...b]),
+        history: [],
+        moves: 0,
+        bonusUsedThisLevel: false,
+        interstitialFlagged: false,
+        optimalSteps: s.optimalSteps,
+        requireBonus: s.requireBonus,
+      });
+
       session = { levelNum, params };
       Render.renderAll();
       Render.hideWin();
       // Туториал — только на L1, и только если игрок ещё не прошёл ни одного уровня.
       if (window.Tutorial) Tutorial.maybeStart(levelNum);
     }, 30);
+  }
+
+  /**
+   * Восстанавливает поле/историю/мету из savedRun без перегенерации.
+   * Вызывается из loadLevel'а, когда мы повторно заходим в активный уровень.
+   */
+  function restoreFromSavedRun(savedRun) {
+    const params = savedRun.params || Levels.getParams(savedRun.level);
+    State.init({
+      level: savedRun.level,
+      capacity: params.capacity,
+      sticks: savedRun.currentBottles.map(b => [...b]),
+    });
+    const s = State.get();
+    // Восстанавливаем историю ходов и мета.
+    s.history = (savedRun.history || []).map(h => ({ ...h }));
+    s.moves = savedRun.moves || 0;
+    s.bonusUsedThisLevel = !!savedRun.bonusUsedThisLevel;
+    s.interstitialFlagged = !!savedRun.interstitialFlagged;
+    s.optimalSteps = savedRun.optimalSteps;
+    s.requireBonus = !!savedRun.requireBonus;
+    // initial — нужен для определения «уровень в исходном состоянии».
+    s.initial = savedRun.initialBottles.map(b => [...b]);
+
+    session = { levelNum: savedRun.level, params };
+    Render.renderAll();
+    Render.hideWin();
+    if (window.Tutorial) Tutorial.maybeStart(savedRun.level);
+  }
+
+  /**
+   * Снимает текущее состояние с State и сохраняет в localStorage. Зовётся
+   * после каждого хода игрока (move, undo, bonus). Реактивно держит
+   * savedRun свежим, чтобы reload восстанавливал именно то, что было.
+   * При бонусе initial тоже растёт на +1 пустую колбу — обновляем и его.
+   */
+  function snapshotRun() {
+    const s = State.get();
+    if (!s) return;
+    Persist.updateSavedRun({
+      initialBottles: (s.initial || []).map(b => [...b]),
+      currentBottles: s.sticks.map(b => [...b]),
+      history: (s.history || []).map(h => ({ ...h })),
+      moves: s.moves || 0,
+      bonusUsedThisLevel: !!s.bonusUsedThisLevel,
+      interstitialFlagged: !!s.interstitialFlagged,
+    });
   }
 
   function wireEvents() {
@@ -2833,7 +3100,6 @@ window.App = (() => {
       : null;
     const result = State.clickStick(idx);
     if (result === 'invalid') return;
-    if (window.Tutorial) Tutorial.notifyPlayerActed();
     if (result === 'moved' && prevSelected !== null && prevTopColor) {
       // Не рендерим сразу — оставляем pre-move DOM (источник со всеми
       // слоями). animatePour сам перерисует src/dst колбы на post-move
@@ -2842,12 +3108,17 @@ window.App = (() => {
       try { await Render.animatePour(prevSelected, idx, prevTopColor); }
       finally { transferLocked = false; }
       Render.renderAll(); // финальный полный rerender — подстраховка
+      snapshotRun(); // сохраняем поле + историю после удачного хода
+      // Туториальная рука может теперь указать на следующий шаг — но
+      // только ПОСЛЕ анимации перелива, чтобы не появлялась посреди.
+      if (window.Tutorial) Tutorial.notifyPlayerActed();
       if (State.isWon()) onWin();
       return;
     }
-    Render.renderAll(); // selected/deselected
+    Render.renderAll(); // selected/deselected/switched/locked
+    // Для нон-moved результатов туториал реагирует сразу.
+    if (window.Tutorial) Tutorial.notifyPlayerActed();
     return;
-    if (result === 'moved' && State.isWon()) onWin();
   }
 
   function onUndo() {
@@ -2859,6 +3130,7 @@ window.App = (() => {
     Persist.save(persisted);
     flagInterstitialTrigger();
     Render.renderAll();
+    snapshotRun(); // откат — тоже состояние, его надо сохранить
   }
 
   function onWin() {
@@ -2870,6 +3142,9 @@ window.App = (() => {
     // Следующий уровень сохраним заранее, чтобы перезагрузка после победы
     // показывала уже новый.
     persisted.level = (s ? s.level : 1) + 1;
+    // Очищаем savedRun — этот уровень пройден; следующая loadLevel
+    // сгенерирует новый.
+    persisted.savedRun = null;
     Persist.save(persisted);
     // Прогреваем интерстишл на фоне, пока игрок читает модал — на native
     // wrapper preload идёт в его SDK, у нас он no-op для других backend'ов.
@@ -2910,6 +3185,7 @@ window.App = (() => {
         flagInterstitialTrigger();
         Render.renderAll();
         Render.toast('+1 колба (бонус)');
+        snapshotRun(); // бонус добавил +1 пустую колбу — это новое состояние
       }
     });
   }
