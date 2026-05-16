@@ -1851,12 +1851,13 @@ window.Ads = (() => {
   }
 
   /**
-   * Заранее прогревает кеш интерстишла. На native — native wrapper и так
-   * выполняет preload в onAdDismissed, но дополнительный вызов безопасен
-   * (повторный preload игнорируется или просто рефрешит кэш). На yagames
-   * и mock — no-op (yagames держит свой кэш, mock не нужен).
-   * Вызывается из App.onWin (когда показывается модал победы) — даём 1-2
-   * секунды на подгрузку перед тем как игрок нажмёт «Дальше».
+   * Прогрев интерстишла. На native повторный preload безопасен (SDK
+   * либо игнорирует если креатив уже есть, либо рефрешит). На yagames
+   * и mock — no-op. Зовётся:
+   *   1) в Ads.init() при старте приложения (внутри backend detect);
+   *   2) в App.onWin (модал победы — даём 1-2с на подгрузку до клика
+   *      «Дальше»);
+   *   3) автоматически после каждого showInterstitial (см. ниже).
    */
   function preloadInterstitial() {
     if (backend === 'native' && window.YandexAds && typeof window.YandexAds.preloadInterstitial === 'function') {
@@ -1864,58 +1865,84 @@ window.Ads = (() => {
     }
   }
 
+  /**
+   * Прогрев rewarded. Раньше зов только в Ads.init() — поэтому ПЕРВЫЙ
+   * клик «+колба» на L1 мог ждать пока SDK подтянет креатив по сети
+   * (особенно если игрок запустил приложение и тут же нажал). Теперь
+   * также:
+   *   1) в App.onWin (готовим к следующему уровню — игрок может
+   *      нажать «+колба» сразу после loadLevel);
+   *   2) автоматически после каждого showRewarded.
+   */
+  function preloadRewarded() {
+    if (backend === 'native' && window.YandexAds && typeof window.YandexAds.preloadRewarded === 'function') {
+      try { window.YandexAds.preloadRewarded(UNIT_REWARDED); } catch (e) {}
+    }
+  }
+
   function showInterstitial() {
-    if (backend === 'native') {
-      return new Promise(resolve => {
-        pendingInterstitial = resolve;
-        try { window.YandexAds.showInterstitial(UNIT_INTERSTITIAL); }
-        catch (e) { console.warn('[Ads] native interstitial failed', e); pendingInterstitial = null; resolve(); }
-      });
-    }
-    if (backend === 'yagames' && ysdk) {
-      return new Promise(resolve => {
-        ysdk.adv.showFullscreenAdv({
-          callbacks: { onClose: () => resolve(), onError: () => resolve() },
+    const promise = (() => {
+      if (backend === 'native') {
+        return new Promise(resolve => {
+          pendingInterstitial = resolve;
+          try { window.YandexAds.showInterstitial(UNIT_INTERSTITIAL); }
+          catch (e) { console.warn('[Ads] native interstitial failed', e); pendingInterstitial = null; resolve(); }
         });
+      }
+      if (backend === 'yagames' && ysdk) {
+        return new Promise(resolve => {
+          ysdk.adv.showFullscreenAdv({
+            callbacks: { onClose: () => resolve(), onError: () => resolve() },
+          });
+        });
+      }
+      // mock
+      return new Promise(resolve => {
+        console.log('[Ads] showInterstitial mock');
+        setTimeout(resolve, 600);
       });
-    }
-    // mock
-    return new Promise(resolve => {
-      console.log('[Ads] showInterstitial mock');
-      setTimeout(resolve, 600);
-    });
+    })();
+    // После закрытия — сразу прогреваем следующий креатив. Так
+    // следующий показ интерстишла (через 2+ мин по cooldown'у) будет
+    // мгновенным.
+    return promise.finally(() => { try { preloadInterstitial(); } catch (_e) {} });
   }
 
   function showRewarded() {
-    if (backend === 'native') {
-      return new Promise(resolve => {
-        pendingRewarded = (rewarded) => resolve({ rewarded });
-        try { window.YandexAds.showRewarded(UNIT_REWARDED); }
-        catch (e) { console.warn('[Ads] native rewarded failed', e); pendingRewarded = null; resolve({ rewarded: false }); }
-      });
-    }
-    if (backend === 'yagames' && ysdk) {
-      return new Promise(resolve => {
-        let gotReward = false;
-        ysdk.adv.showRewardedVideo({
-          callbacks: {
-            onRewarded: () => { gotReward = true; },
-            onClose: () => resolve({ rewarded: gotReward }),
-            onError: () => resolve({ rewarded: false }),
-          },
+    const promise = (() => {
+      if (backend === 'native') {
+        return new Promise(resolve => {
+          pendingRewarded = (rewarded) => resolve({ rewarded });
+          try { window.YandexAds.showRewarded(UNIT_REWARDED); }
+          catch (e) { console.warn('[Ads] native rewarded failed', e); pendingRewarded = null; resolve({ rewarded: false }); }
         });
+      }
+      if (backend === 'yagames' && ysdk) {
+        return new Promise(resolve => {
+          let gotReward = false;
+          ysdk.adv.showRewardedVideo({
+            callbacks: {
+              onRewarded: () => { gotReward = true; },
+              onClose: () => resolve({ rewarded: gotReward }),
+              onError: () => resolve({ rewarded: false }),
+            },
+          });
+        });
+      }
+      // mock — всегда даём reward
+      return new Promise(resolve => {
+        console.log('[Ads] showRewarded mock — granting reward');
+        setTimeout(() => resolve({ rewarded: true }), 800);
       });
-    }
-    // mock — всегда даём reward
-    return new Promise(resolve => {
-      console.log('[Ads] showRewarded mock — granting reward');
-      setTimeout(() => resolve({ rewarded: true }), 800);
-    });
+    })();
+    // После показа — прогрев на следующий клик. Иначе игрок ждал бы
+    // повторно несколько секунд.
+    return promise.finally(() => { try { preloadRewarded(); } catch (_e) {} });
   }
 
   function getBackend() { return backend; }
 
-  return { init, showInterstitial, preloadInterstitial, showRewarded, getBackend, UNIT_INTERSTITIAL, UNIT_REWARDED };
+  return { init, showInterstitial, preloadInterstitial, showRewarded, preloadRewarded, getBackend, UNIT_INTERSTITIAL, UNIT_REWARDED };
 })();
 
 /* ============================================================
@@ -3563,10 +3590,13 @@ window.App = (() => {
     persisted.savedRun = null;
     Persist.save(persisted);
     sessionCompletedCount++;
-    // Прогреваем интерстишл на фоне, пока игрок читает модал — на native
-    // wrapper preload идёт в его SDK, у нас он no-op для других backend'ов.
-    if (window.Ads && Ads.preloadInterstitial) {
-      try { Ads.preloadInterstitial(); } catch (_e) {}
+    // Прогреваем рекламу на фоне, пока игрок читает модал победы:
+    //   - interstitial — для возможного показа между уровнями;
+    //   - rewarded — игрок может нажать «+колба» сразу после loadLevel.
+    // На native — реальный preload в Yandex SDK; на yagames/mock — no-op.
+    if (window.Ads) {
+      if (Ads.preloadInterstitial) { try { Ads.preloadInterstitial(); } catch (_e) {} }
+      if (Ads.preloadRewarded)     { try { Ads.preloadRewarded();     } catch (_e) {} }
     }
     Render.showWin(`Молодец! Готов к уровню ${persisted.level}?`);
   }
@@ -3612,9 +3642,15 @@ window.App = (() => {
       const p = Persist.load();
       p.rateUsCompleted = true;
       Persist.save(p);
-      // Заглушка перехода в стор. В production-APK подменяется на
-      // window.open('market://details?id=...') или RuStore URL.
-      try { window.open('about:blank', '_blank'); } catch (_e) {}
+      // Переход на страницу приложения в RuStore. Capacitor WebView
+      // ловит target='_blank' и через Intent.ACTION_VIEW открывает
+      // URL — на устройстве с установленным RuStore это запустит
+      // нативное приложение RuStore сразу на странице игры (deep-link),
+      // на устройстве без RuStore — откроется в системном браузере.
+      try {
+        window.open('https://www.rustore.ru/catalog/app/com.terekh.glittersort',
+                    '_blank', 'noopener,noreferrer');
+      } catch (_e) {}
       Render.hideRateUs();
       callback();
     };
