@@ -8,3 +8,5 @@ node_modules/
 *.apk
 *.aab
 .claude/worktrees/
+# Рабочие референсы/исходники для скриншотов (готовые .png в screenshots/ коммитятся)
+Store_Info/screenshots/рефы/
