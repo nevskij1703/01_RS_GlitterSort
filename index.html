@@ -438,6 +438,52 @@ body{
 .btn-link:hover{color:rgba(255,255,255,.8)}
 .btn-link:active{transform:translateY(1px)}
 
+/* ===== INFO BUTTON ("i" — Политика конфиденциальности) =====
+   Маленькая плавающая кнопка в правом-нижнем углу. По нажатию открывает
+   #info-modal с кнопкой-ссылкой на политику (открывается в системном
+   браузере через window.open). Не перекрывает bottom-bar — он у левого
+   края, мы у правого. */
+.info-btn{
+  position:fixed;
+  right:max(10px, env(safe-area-inset-right));
+  bottom:max(10px, env(safe-area-inset-bottom));
+  width:36px;height:36px;
+  border:none;
+  border-radius:50%;
+  background:rgba(255,255,255,.10);
+  color:rgba(255,255,255,.78);
+  font-family:'Times New Roman', serif;
+  font-style:italic;
+  font-weight:700;
+  font-size:20px;
+  line-height:34px;
+  cursor:pointer;
+  z-index:40;
+  transition:background .15s, transform .1s, color .15s;
+  -webkit-tap-highlight-color:transparent;
+}
+.info-btn:hover{background:rgba(255,255,255,.18);color:#fff}
+.info-btn:active{transform:scale(.92)}
+
+/* Info-модал использует общий .modal-wrap / .modal каркас.
+   Внутри — заголовок, кнопка-ссылка на политику, кнопка «Закрыть». */
+.info-modal .privacy-link{
+  display:inline-block;
+  background:none;
+  border:1px solid var(--panel-border);
+  color:var(--text);
+  font-family:inherit;
+  font-size:15px;
+  padding:12px 18px;
+  border-radius:14px;
+  cursor:pointer;
+  transition:background .15s, border-color .15s, transform .1s;
+  margin-bottom:6px;
+  text-decoration:none;     /* убираем подчёркивание у <a> */
+}
+.info-modal .privacy-link:hover{background:rgba(255,255,255,.06);border-color:rgba(255,255,255,.28)}
+.info-modal .privacy-link:active{transform:translateY(1px)}
+
 /* ===== DEV PANEL ===== */
 .dev{
   position:fixed;top:8px;left:8px;right:8px;bottom:8px;
@@ -564,6 +610,23 @@ body{
 
 <!-- Туториальная рука для первого хода на L1 -->
 <div class="tutorial-hand" id="tutorial-hand" aria-hidden="true">👆</div>
+
+<!-- Плавающая кнопка «i» в правом-нижнем углу: открывает info-modal
+     со ссылкой на политику конфиденциальности. Обязательное требование
+     РуСтор/Google Play при наличии рекламы. -->
+<button class="info-btn" id="info-btn" aria-label="О приложении" title="О приложении">i</button>
+
+<!-- Info-модал: одна текстовая ссылка на политику (открывается в
+     системном браузере — Capacitor WebView триггерит Intent.ACTION_VIEW
+     для href с target="_blank") + закрытие.
+     href выставляется из JS, чтобы URL хранился в одном месте. -->
+<div class="modal-wrap" id="info-modal">
+  <div class="modal info-modal">
+    <h2>О приложении</h2>
+    <a class="privacy-link" id="btn-privacy-link" href="#" target="_blank" rel="noopener noreferrer">Политика конфиденциальности</a>
+    <button class="btn-link" id="btn-info-close">Закрыть</button>
+  </div>
+</div>
 
 <div class="modal-wrap" id="win-modal">
   <div class="modal">
@@ -3417,6 +3480,29 @@ window.App = (() => {
       }
     });
     // HTML2APK:DEV_ONLY_END
+
+    // Info-кнопка и её модалка. URL политики совпадает с тем, что
+    // указано в STORE_LISTING.md (поле privacyUrl) и в самой политике —
+    // это требование магазинов: ссылка должна быть доступна изнутри
+    // приложения. Используем <a target="_blank">: Capacitor WebView
+    // ловит навигацию по такой ссылке и через Intent.ACTION_VIEW
+    // открывает её в системном браузере (а игра остаётся в WebView).
+    const PRIVACY_URL = 'https://cloud.mail.ru/public/gbq2/5oCQCPwCR';
+    const $infoBtn   = document.getElementById('info-btn');
+    const $infoModal = document.getElementById('info-modal');
+    const $infoClose = document.getElementById('btn-info-close');
+    const $infoLink  = document.getElementById('btn-privacy-link');
+    if ($infoLink) $infoLink.href = PRIVACY_URL;   // URL хранится в одном месте
+    const openInfo  = () => { if ($infoModal) $infoModal.classList.add('open'); };
+    const closeInfo = () => { if ($infoModal) $infoModal.classList.remove('open'); };
+    if ($infoBtn)   $infoBtn.addEventListener('click', openInfo);
+    if ($infoClose) $infoClose.addEventListener('click', closeInfo);
+    // Клик по ссылке: браузер сам открывает URL, мы только закрываем модалку.
+    if ($infoLink)  $infoLink.addEventListener('click', () => { closeInfo(); });
+    // Клик по затемнению вне .modal — тоже закрытие.
+    if ($infoModal) $infoModal.addEventListener('click', (e) => {
+      if (e.target === $infoModal) closeInfo();
+    });
   }
 
   function onStickClick(idx) {
