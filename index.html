@@ -1551,6 +1551,25 @@ window.Migrations = (() => {
       if ('version' in state) delete state.version;
       return state;
     },
+    2: (state) => {
+      // v1 → v2: добавлены поля push-уведомлений.
+      //   pushEnabled — toggle. Default true (без permission ничего не покажется).
+      //   pushPermissionAsked — флаг чтобы не спрашивать повторно.
+      if (typeof state.pushEnabled !== 'boolean') state.pushEnabled = true;
+      if (typeof state.pushPermissionAsked !== 'boolean') state.pushPermissionAsked = false;
+      return state;
+    },
+    3: (state) => {
+      // v2 → v3: добавлен userId для AppMetrica analytics.
+      //   UUID v4 (crypto.randomUUID на WebView 92+/Android 8+), fallback
+      //   на pseudo-UUID. Один раз — на всю жизнь установки.
+      if (!state.userId) {
+        state.userId = (typeof crypto !== 'undefined' && crypto.randomUUID)
+          ? crypto.randomUUID()
+          : 'u-' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+      }
+      return state;
+    },
   };
 
   function getCurrentSchemaVersion() {
@@ -1602,6 +1621,11 @@ window.Persist = (() => {
     sessionCount: 0,
     rateUsShownAtL3: false,
     rateUsCompleted: false,
+    // Push-уведомления. См. migration[2] и [PUSH_SCHEDULER] блок.
+    pushEnabled: true,
+    pushPermissionAsked: false,
+    // AppMetrica analytics. См. migration[3] и [ANALYTICS] блок ниже.
+    userId: null,
   };
 
   function load() {
@@ -1785,6 +1809,20 @@ window.Persist = (() => {
     } catch (e) {}
   }
 
+  // AppMetrica analytics: стабильный UUID per-install.
+  // Migration 3 заполняет при загрузке старого сейва; для fresh install
+  // (без миграций) — генерируем лениво при первом обращении.
+  function getUserId() {
+    const data = load();
+    if (!data.userId) {
+      data.userId = (typeof crypto !== 'undefined' && crypto.randomUUID)
+        ? crypto.randomUUID()
+        : 'u-' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+      save(data);
+    }
+    return data.userId;
+  }
+
   return {
     KEY, DEFAULTS, load, save,
     loadCustomLevel, saveCustomLevel, clearCustomLevel, clearAll, clear,
@@ -1792,7 +1830,92 @@ window.Persist = (() => {
     bumpInterstitialCounter, shouldShowInterstitial,
     markInterstitialPending, clearInterstitialPending, loadInterstitialPending,
     saveSavedRun, loadSavedRun, clearSavedRun, updateSavedRun,
+    getUserId,
   };
+})();
+
+/* ============================================================
+   [ANALYTICS] — Yandex AppMetrica wrapper (window.Analytics).
+   Контракт см. в skill `connect-appmetrica` и docs/ANALYTICS.md.
+   Bridge `window.AppMetrica` инжектится через html2apk -YandexAppMetrica.
+   В browser dev — mock-mode: все события идут в console.log.
+   ============================================================ */
+window.Analytics = (() => {
+  let configured = false;
+  const ctx = {
+    appName: 'unknown',
+    appVersion: '1.0.0',
+    platform: (typeof window !== 'undefined' && window.AppMetrica) ? 'android' : 'browser',
+    userId: null,
+  };
+
+  function configure(opts) {
+    opts = opts || {};
+    if (opts.appName)    ctx.appName    = opts.appName;
+    if (opts.appVersion) ctx.appVersion = opts.appVersion;
+    if (opts.userId)     ctx.userId     = opts.userId;
+    configured = true;
+    if (window.AppMetrica && ctx.userId) {
+      try { window.AppMetrica.setUserProfileID(String(ctx.userId)); }
+      catch (e) { console.warn('[analytics] setUserProfileID failed:', e); }
+    }
+    if (!window.AppMetrica) console.log('[analytics] configured (browser mock):', ctx);
+    // Push attribution: cold-start + warm-start (visibilitychange).
+    // См. SKILL connect-appmetrica → секция «Push attribution».
+    checkPushOpenedAttribution();
+    if (!visibilityHooked && typeof document !== 'undefined' && document.addEventListener) {
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') checkPushOpenedAttribution();
+      });
+      visibilityHooked = true;
+    }
+  }
+
+  let visibilityHooked = false;
+  function checkPushOpenedAttribution() {
+    if (!window.LocalNotifications || typeof window.LocalNotifications.consumePushTemplateId !== 'function') return;
+    try {
+      const tid = window.LocalNotifications.consumePushTemplateId();
+      if (tid) event('push_opened', { template_id: tid });
+    } catch (e) { console.warn('[analytics] consumePushTemplateId failed:', e); }
+  }
+
+  function event(name, params) {
+    if (!configured) console.warn('[analytics] event before configure():', name);
+    const payload = Object.assign({}, params || {}, {
+      app_name:    ctx.appName,
+      app_version: ctx.appVersion,
+      platform:    ctx.platform,
+      user_id:     ctx.userId,
+    });
+    if (window.AppMetrica) {
+      try { window.AppMetrica.reportEvent(name, JSON.stringify(payload)); }
+      catch (e) { console.warn('[analytics] reportEvent failed:', name, e); }
+    } else {
+      console.log('[analytics]', name, payload);
+    }
+  }
+
+  function adShown(opts) {
+    opts = opts || {};
+    const kind = opts.type === 'rewarded' ? 'ad_rewarded_shown' : 'ad_interstitial_shown';
+    const params = { placement: opts.placement || 'unknown' };
+    if (opts.type === 'rewarded') {
+      params.watched      = !!opts.watched;
+      params.reward_given = !!opts.rewardGiven;
+    }
+    event(kind, params);
+  }
+
+  function setUser(id) {
+    ctx.userId = id;
+    if (window.AppMetrica) {
+      try { window.AppMetrica.setUserProfileID(String(id)); }
+      catch (e) { console.warn('[analytics] setUser failed:', e); }
+    }
+  }
+
+  return { configure, event, adShown, setUser };
 })();
 
 /* ============================================================
@@ -1805,26 +1928,38 @@ window.Persist = (() => {
    ============================================================ */
 window.Ads = (() => {
   // Ad-unit IDs из Yandex Mobile Ads (partner.yandex.ru/mobile-ads).
-  const UNIT_INTERSTITIAL = 'R-M-19273571-2';
-  const UNIT_REWARDED     = 'R-M-19273571-1';
+  const UNIT_INTERSTITIAL = 'R-M-19273487-1';
+  const UNIT_REWARDED     = 'R-M-19273487-2';
+
+  // Таймаут на ожидание callback'а от Java. Страховка от молчаливого
+  // зависания SDK (нет fill / нет сети / unit на модерации). 120 сек —
+  // Yandex rewarded видео макс ~60 сек + закрытие, interstitial 10-15 сек.
+  // Раньше нет таймаута → Promise висел вечно, юзер не мог продолжить игру.
+  const CALLBACK_TIMEOUT_MS = 120_000;
 
   let backend = 'mock';
   let ysdk = null;
   // Хэндлеры для callback'ов от нативного бриджа
   let pendingInterstitial = null;
   let pendingRewarded = null;
+  let pendingInterstitialTimer = null;
+  let pendingRewardedTimer = null;
 
   function init() {
     if (window.YandexAds && typeof window.YandexAds.showInterstitial === 'function') {
       backend = 'native';
       window.__yandexAdsCallback = (kind, event) => {
         if (kind === 'interstitial' && pendingInterstitial) {
-          pendingInterstitial();
+          const cb = pendingInterstitial;
           pendingInterstitial = null;
+          if (pendingInterstitialTimer) { clearTimeout(pendingInterstitialTimer); pendingInterstitialTimer = null; }
+          cb();
         }
         if (kind === 'rewarded' && pendingRewarded) {
-          pendingRewarded(event === 'rewarded');
+          const cb = pendingRewarded;
           pendingRewarded = null;
+          if (pendingRewardedTimer) { clearTimeout(pendingRewardedTimer); pendingRewardedTimer = null; }
+          cb(event === 'rewarded');
         }
       };
       console.log('[Ads] backend=native (YandexAds bridge)');
@@ -1885,8 +2020,23 @@ window.Ads = (() => {
       if (backend === 'native') {
         return new Promise(resolve => {
           pendingInterstitial = resolve;
+          // Страховочный таймаут: если Java молчит >120s — снимаем
+          // pending и резолвим, чтобы JS не подвис на await навсегда.
+          pendingInterstitialTimer = setTimeout(() => {
+            if (pendingInterstitial) {
+              console.warn('[Ads] interstitial callback timeout — assume not shown');
+              pendingInterstitial = null;
+              pendingInterstitialTimer = null;
+              resolve();
+            }
+          }, CALLBACK_TIMEOUT_MS);
           try { window.YandexAds.showInterstitial(UNIT_INTERSTITIAL); }
-          catch (e) { console.warn('[Ads] native interstitial failed', e); pendingInterstitial = null; resolve(); }
+          catch (e) {
+            console.warn('[Ads] native interstitial failed', e);
+            pendingInterstitial = null;
+            if (pendingInterstitialTimer) { clearTimeout(pendingInterstitialTimer); pendingInterstitialTimer = null; }
+            resolve();
+          }
         });
       }
       if (backend === 'yagames' && ysdk) {
@@ -1913,8 +2063,22 @@ window.Ads = (() => {
       if (backend === 'native') {
         return new Promise(resolve => {
           pendingRewarded = (rewarded) => resolve({ rewarded });
+          // Страховочный таймаут (см. CALLBACK_TIMEOUT_MS).
+          pendingRewardedTimer = setTimeout(() => {
+            if (pendingRewarded) {
+              console.warn('[Ads] rewarded callback timeout — assume not granted');
+              pendingRewarded = null;
+              pendingRewardedTimer = null;
+              resolve({ rewarded: false });
+            }
+          }, CALLBACK_TIMEOUT_MS);
           try { window.YandexAds.showRewarded(UNIT_REWARDED); }
-          catch (e) { console.warn('[Ads] native rewarded failed', e); pendingRewarded = null; resolve({ rewarded: false }); }
+          catch (e) {
+            console.warn('[Ads] native rewarded failed', e);
+            pendingRewarded = null;
+            if (pendingRewardedTimer) { clearTimeout(pendingRewardedTimer); pendingRewardedTimer = null; }
+            resolve({ rewarded: false });
+          }
         });
       }
       if (backend === 'yagames' && ysdk) {
@@ -1943,6 +2107,343 @@ window.Ads = (() => {
   function getBackend() { return backend; }
 
   return { init, showInterstitial, preloadInterstitial, showRewarded, preloadRewarded, getBackend, UNIT_INTERSTITIAL, UNIT_REWARDED };
+})();
+
+/* ============================================================
+   [RUSTORE_REVIEW] — обёртка над нативным RuStore In-App Review SDK.
+   Контракт Java↔JS зашит в RuStoreReviewBridge.java (генерируется html2apk
+   при флаге -RuStoreReviewSdk). Если bridge'а нет (browser dev / APK без
+   флага) или SDK вернул 'unavailable' (нет RuStore / устарел) — fallback
+   на deep-link window.open(rustore.ru/catalog/app/...). 'failed' (уже
+   оценивал / лимит / не авторизован) — silent, юзера не теребим.
+   Полная архитектура: ~/.claude/skills/connect-rustore-review/SKILL.md
+   ============================================================ */
+window.RuStoreReviewClient = (() => {
+  const DEEP_LINK_TEMPLATE = 'https://www.rustore.ru/catalog/app/';
+  const CALLBACK_TIMEOUT_MS = 30000;
+
+  let appIdForFallback = null;
+  let pendingResolve = null;
+  let pendingTimer = null;
+  let callbackRegistered = false;
+
+  function setupCallback() {
+    if (callbackRegistered) return;
+    callbackRegistered = true;
+    window.__rustoreReviewCallback = (result, error) => {
+      console.log('[rustoreReview] callback:', result, error);
+      if (!pendingResolve) {
+        console.warn('[rustoreReview] callback without pending');
+        return;
+      }
+      const resolve = pendingResolve;
+      pendingResolve = null;
+      if (pendingTimer) { clearTimeout(pendingTimer); pendingTimer = null; }
+      if (result === 'shown') {
+        resolve({ shown: true, fallbackUsed: false, error: null });
+      } else if (result === 'failed') {
+        // Silent failure SDK — без fallback, юзера не теребим.
+        resolve({ shown: false, fallbackUsed: false, error });
+      } else {
+        // 'unavailable' — нет RuStore / устарел → fallback.
+        openDeepLink();
+        resolve({ shown: false, fallbackUsed: true, error });
+      }
+    };
+  }
+
+  function openDeepLink() {
+    if (!appIdForFallback) return;
+    try {
+      window.open(DEEP_LINK_TEMPLATE + appIdForFallback,
+                  '_blank', 'noopener,noreferrer');
+    } catch (e) { console.warn('[rustoreReview] deep-link failed:', e); }
+  }
+
+  function hasBridge() {
+    return !!(window.RuStoreReview
+              && typeof window.RuStoreReview.launch === 'function');
+  }
+
+  function configure(appId) {
+    appIdForFallback = appId;
+    if (hasBridge()) {
+      setupCallback();
+      try { window.RuStoreReview.preload(); }
+      catch (e) { console.warn('[rustoreReview] preload threw:', e); }
+      console.log('[rustoreReview] backend=native, preload requested');
+    } else {
+      console.log('[rustoreReview] backend=fallback (no bridge — dev browser or APK without -RuStoreReviewSdk)');
+    }
+  }
+
+  function launch() {
+    if (pendingResolve) {
+      return new Promise(resolve => {
+        const prev = pendingResolve;
+        pendingResolve = (r) => { prev(r); resolve(r); };
+      });
+    }
+    if (!hasBridge()) {
+      openDeepLink();
+      return Promise.resolve({ shown: false, fallbackUsed: true, error: 'no_bridge' });
+    }
+    return new Promise(resolve => {
+      pendingResolve = resolve;
+      pendingTimer = setTimeout(() => {
+        if (!pendingResolve) return;
+        console.warn('[rustoreReview] callback timeout — fallback to deep-link');
+        const r = pendingResolve;
+        pendingResolve = null;
+        pendingTimer = null;
+        openDeepLink();
+        r({ shown: false, fallbackUsed: true, error: 'callback_timeout' });
+      }, CALLBACK_TIMEOUT_MS);
+      try {
+        window.RuStoreReview.launch();
+      } catch (e) {
+        console.warn('[rustoreReview] native launch threw:', e);
+        if (pendingTimer) { clearTimeout(pendingTimer); pendingTimer = null; }
+        pendingResolve = null;
+        openDeepLink();
+        resolve({ shown: false, fallbackUsed: true, error: 'launch_threw' });
+      }
+    });
+  }
+
+  return { configure, launch };
+})();
+
+/* ============================================================
+   [PUSH_TEMPLATES] — шаблоны локальных push-уведомлений для Колбочек.
+   Тон: спокойный, релакс, casual. Не агрессивно. ASMR-эффект цветов.
+   ============================================================ */
+window.PUSH_TEMPLATES = [
+  // ===== Утро (09:00-10:30) =====
+  { id: 'morning-coffee', slot: 'morning', weekdays: 'any',
+    title: '☕ Утренняя сортировка',
+    body: 'Цвета ждут пробуждения — 5 минут на тебя',
+    cooldownDays: 3 },
+  { id: 'morning-hello', slot: 'morning', weekdays: 'any',
+    title: '🌅 Привет, новый день',
+    body: 'Сегодня новые уровни? Заходи проверить',
+    cooldownDays: 4 },
+  // ===== Обед (13:00-14:00) =====
+  { id: 'lunch-break', slot: 'lunch', weekdays: 'any',
+    title: '🍰 Обеденный перерыв',
+    body: 'Пара колбочек снимет напряжение',
+    cooldownDays: 3 },
+  { id: 'lunch-palette', slot: 'lunch', weekdays: 'any',
+    title: '🧪 Палитра дня готова',
+    body: 'Свежие цвета — 5 минут?',
+    cooldownDays: 4 },
+  // ===== Вечер (19:30-21:00) =====
+  { id: 'evening-calm', slot: 'evening', weekdays: 'any',
+    title: '🌙 Спокойный вечер',
+    body: 'Рассортируй цвета перед сном',
+    cooldownDays: 3 },
+  { id: 'evening-challenge', slot: 'evening', weekdays: 'any',
+    title: '💎 Сегодня тебе повезёт?',
+    body: 'Сложный уровень — попробуй разок',
+    cooldownDays: 5 },
+  // ===== Cooldown / общие =====
+  { id: 'cooldown-miss', slot: 'evening', weekdays: 'any',
+    title: '🧪 Колбочки скучают',
+    body: 'Заходи — мы соскучились',
+    cooldownDays: 7 },
+  { id: 'streak-keep-going', slot: 'evening', weekdays: 'any',
+    title: '🔥 N дней подряд!',
+    body: 'Не сломай серию — короткий уровень',
+    cooldownDays: 10 },
+  { id: 'challenge-too-easy', slot: 'lunch', weekdays: 'any',
+    title: 'Слишком легко? ✨',
+    body: 'Уровень 20 ждёт смельчака',
+    cooldownDays: 7 },
+  { id: 'daily-bonus', slot: 'morning', weekdays: 'any',
+    title: '🎁 Сегодняшний бонус',
+    body: 'Пустая колба-бонус готова',
+    cooldownDays: 5 },
+  { id: 'weekend-rainbow', slot: 'morning', weekdays: 'weekend',
+    title: '🌈 Воскресный микс',
+    body: 'Самые красивые комбинации',
+    cooldownDays: 7 }
+];
+
+/* ============================================================
+   [PUSH_SCHEDULER] — менеджер локальных push-уведомлений. См.
+   ~/.claude/skills/connect-local-notifications/SKILL.md для контракта.
+   ============================================================ */
+window.PushScheduler = (function () {
+  const SLOT_WINDOWS = {
+    morning: { hour: 9,  minute: 0,  spreadMinutes: 90 },
+    lunch:   { hour: 13, minute: 0,  spreadMinutes: 60 },
+    evening: { hour: 19, minute: 30, spreadMinutes: 90 },
+    night:   { hour: 22, minute: 30, spreadMinutes: 30 }
+  };
+  const HORIZON_HOURS = 168;  // 7 дней. Главный механизм поддержки цепочки — auto-reschedule в Java NotificationReceiver (skill connect-local-notifications).
+  const DEFAULT_MAX_PER_DAY = 4;
+  let appName = 'Game', templates = [], maxPerDay = DEFAULT_MAX_PER_DAY;
+  let storageKey = 'push_scheduler';
+  let pendingPermissionResolve = null, callbackRegistered = false;
+
+  function hasBridge() {
+    return !!(window.LocalNotifications && typeof window.LocalNotifications.schedule === 'function');
+  }
+  function setupCallback() {
+    if (callbackRegistered) return;
+    callbackRegistered = true;
+    window.__localNotificationsCallback = function (kind, data) {
+      console.log('[push] callback:', kind, data);
+      if (kind === 'permission' && pendingPermissionResolve) {
+        const resolve = pendingPermissionResolve;
+        pendingPermissionResolve = null;
+        resolve(data);
+      }
+    };
+  }
+  function readState() {
+    try { const raw = localStorage.getItem(storageKey); return raw ? JSON.parse(raw) : { shownAt: {}, lastScheduled: 0 }; }
+    catch (e) { return { shownAt: {}, lastScheduled: 0 }; }
+  }
+  function writeState(s) {
+    try { localStorage.setItem(storageKey, JSON.stringify(s)); }
+    catch (e) { console.warn('[push] state write failed', e); }
+  }
+  function nextSlotDate(slot, baseDate) {
+    const w = SLOT_WINDOWS[slot]; if (!w) return null;
+    const d = new Date(baseDate);
+    const offsetMin = Math.floor(Math.random() * (w.spreadMinutes + 1));
+    d.setHours(w.hour, w.minute + offsetMin, 0, 0);
+    if (d.getTime() <= Date.now() + 60000) {
+      d.setDate(d.getDate() + 1);
+      const off2 = Math.floor(Math.random() * (w.spreadMinutes + 1));
+      d.setHours(w.hour, w.minute + off2, 0, 0);
+    }
+    return d;
+  }
+  function isWeekdayMatch(t, date) {
+    const dow = date.getDay(), w = t.weekdays;
+    if (!w || w === 'any') return true;
+    if (w === 'weekend') return dow === 0 || dow === 6;
+    if (w === 'weekday') return dow >= 1 && dow <= 5;
+    if (Array.isArray(w)) return w.indexOf(dow) >= 0;
+    return true;
+  }
+  function pickTemplateForSlot(slot, date, state, gameState) {
+    const now = Date.now();
+    const candidates = templates.filter(function (t) {
+      if (t.slot !== slot) return false;
+      if (!isWeekdayMatch(t, date)) return false;
+      if (typeof t.requires === 'function') {
+        try { if (!t.requires(gameState || {})) return false; } catch (e) { return false; }
+      }
+      return true;
+    });
+    if (!candidates.length) return null;
+    function ageOf(t) {
+      const last = state.shownAt[t.id] || 0;
+      const cooldownMs = (t.cooldownDays || 1) * 86400000;
+      const elapsed = now - last;
+      return elapsed < cooldownMs ? (elapsed - cooldownMs) : elapsed;
+    }
+    candidates.sort(function (a, b) {
+      const da = ageOf(a), db = ageOf(b);
+      if (db !== da) return db - da;
+      return (b.weight || 1) - (a.weight || 1);
+    });
+    return candidates[0];
+  }
+  function hashId(s) {
+    let h = 5381;
+    for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) & 0x7fffffff;
+    return h;
+  }
+  function configure(opts) {
+    if (!opts) return;
+    appName = opts.appName || appName;
+    templates = Array.isArray(opts.templates) ? opts.templates : [];
+    maxPerDay = (typeof opts.maxPerDay === 'number') ? opts.maxPerDay : DEFAULT_MAX_PER_DAY;
+    storageKey = opts.storageKey || storageKey;
+    setupCallback();
+    console.log('[push] configured: ' + templates.length + ' templates, backend=' + (hasBridge() ? 'native' : 'mock'));
+  }
+  function getPermissionState() {
+    if (!hasBridge()) return 'denied';
+    try { return window.LocalNotifications.getPermissionState() || 'denied'; }
+    catch (e) { return 'denied'; }
+  }
+  function requestPermission() {
+    if (!hasBridge()) return Promise.resolve('denied');
+    if (pendingPermissionResolve) {
+      return new Promise(function (resolve) {
+        const prev = pendingPermissionResolve;
+        pendingPermissionResolve = function (r) { prev(r); resolve(r); };
+      });
+    }
+    return new Promise(function (resolve) {
+      pendingPermissionResolve = resolve;
+      try { window.LocalNotifications.requestPermission(); }
+      catch (e) { pendingPermissionResolve = null; resolve('denied'); }
+      setTimeout(function () {
+        if (pendingPermissionResolve === resolve || pendingPermissionResolve) {
+          const r = pendingPermissionResolve;
+          pendingPermissionResolve = null;
+          if (r) r('denied');
+        }
+      }, 60000);
+    });
+  }
+  function isEnabled() {
+    if (typeof window.__getPushEnabled === 'function') return !!window.__getPushEnabled();
+    const s = readState();
+    return s.enabled !== false;
+  }
+  function setEnabled(v) {
+    if (typeof window.__setPushEnabled === 'function') window.__setPushEnabled(!!v);
+    else { const s = readState(); s.enabled = !!v; writeState(s); }
+    if (!v) {
+      if (hasBridge()) { try { window.LocalNotifications.cancelAll(); } catch (e) {} }
+    } else { refresh(); }
+  }
+  function refresh(gameState) {
+    if (!isEnabled()) { console.log('[push] refresh skipped: disabled'); return; }
+    if (getPermissionState() !== 'granted') { console.log('[push] refresh skipped: permission=' + getPermissionState()); return; }
+    if (!templates.length) { console.warn('[push] no templates'); return; }
+    if (hasBridge()) { try { window.LocalNotifications.cancelAll(); } catch (e) {} }
+    const state = readState();
+    const slots = ['morning', 'lunch', 'evening', 'night'];
+    const days = Math.ceil(HORIZON_HOURS / 24);
+    let scheduled = 0; const log = [];
+    for (let dayOffset = 0; dayOffset < days; dayOffset++) {
+      let perDay = 0;
+      for (let i = 0; i < slots.length && perDay < maxPerDay; i++) {
+        const slot = slots[i];
+        const base = new Date();
+        base.setDate(base.getDate() + dayOffset);
+        const at = nextSlotDate(slot, base);
+        if (!at || at.getTime() > Date.now() + HORIZON_HOURS * 3600000) continue;
+        if (at.getTime() <= Date.now() + 30000) continue;
+        const tmpl = pickTemplateForSlot(slot, at, state, gameState);
+        if (!tmpl) continue;
+        const numId = hashId(tmpl.id) ^ Math.floor(at.getTime() / 60000);
+        if (hasBridge()) {
+          // 5-й аргумент templateId — для push attribution (analytics push_opened event).
+          try { window.LocalNotifications.schedule(numId | 0, tmpl.title, tmpl.body, at.getTime(), tmpl.id); }
+          catch (e) { console.warn('[push] schedule failed', tmpl.id, e); continue; }
+        }
+        state.shownAt[tmpl.id] = at.getTime();
+        scheduled++; perDay++;
+        log.push({ id: tmpl.id, slot: slot, at: at.toLocaleString(), title: tmpl.title });
+      }
+    }
+    state.lastScheduled = Date.now();
+    writeState(state);
+    console.log('[push] scheduled ' + scheduled + ' notifications:', log);
+  }
+  return {
+    configure: configure, refresh: refresh, setEnabled: setEnabled, isEnabled: isEnabled,
+    requestPermission: requestPermission, getPermissionState: getPermissionState
+  };
 })();
 
 /* ============================================================
@@ -3293,6 +3794,9 @@ window.App = (() => {
   async function presentInterstitialThenLoad(nextLevel) {
     Render.toast('Реклама...', 1200);
     Persist.markInterstitialPending(Date.now());
+    // Analytics: interstitial. Стрелаем ДО показа — даже если юзер закроет
+    // приложение mid-ad, мы знаем что показ был инициирован.
+    Analytics.adShown({ type: 'interstitial', placement: 'level_transition' });
     let watched = false;
     try {
       const result = await Promise.race([
@@ -3318,6 +3822,53 @@ window.App = (() => {
     sessionCompletedCount = 0;
     rateUsShownThisSession = false;
     await Ads.init().catch(() => {});
+    // RuStore in-app review bridge: регистрируем appId для fallback на deep-link
+    // и запускаем eager preload reviewInfo. Без preload первый launch() висит
+    // 1-2 сек на сетевой запрос; preload делает показ диалога мгновенным.
+    RuStoreReviewClient.configure('com.terekh.glittersort');
+
+    // AppMetrica analytics. configure ДО первого event(). SDK уже активирован
+    // в MainActivity.onCreate (html2apk -YandexAppMetrica), здесь только цепляем
+    // JS-обёртку и шлём session_start как маркер.
+    Analytics.configure({
+      appName: 'glittersort',
+      appVersion: '1.0.0',
+      userId: Persist.getUserId()
+    });
+    Analytics.event('session_start');
+
+    // Push-уведомления (Local Notifications). Источник правды enabled —
+    // Persist (pushEnabled поле). Прокидываем через __getPushEnabled hook.
+    window.__getPushEnabled = function () {
+      const p = Persist.load();
+      return p.pushEnabled !== false;
+    };
+    window.__setPushEnabled = function (v) {
+      const p = Persist.load();
+      p.pushEnabled = !!v;
+      Persist.save(p);
+    };
+    PushScheduler.configure({
+      appName: 'Колбочки',
+      templates: window.PUSH_TEMPLATES,
+      maxPerDay: 4,
+      storageKey: 'glittersort_push_schedule'
+    });
+    // Permission запрашиваем СРАЗУ при первом запуске приложения
+    // (persisted.pushPermissionAsked === false). См. SKILL connect-local-notifications.
+    if (!persisted.pushPermissionAsked && persisted.pushEnabled !== false) {
+      persisted.pushPermissionAsked = true;
+      Persist.save(persisted);
+      setTimeout(function () {
+        PushScheduler.requestPermission().then(function (result) {
+          console.log('[push] permission result:', result);
+          if (result === 'granted') PushScheduler.refresh();
+        });
+      }, 800);
+    } else if (PushScheduler.getPermissionState() === 'granted'
+               && persisted.pushEnabled !== false) {
+      PushScheduler.refresh();
+    }
 
     // Recovery: если меньше 5 минут назад был неотданный интерстишл —
     // показываем его сейчас и только потом грузим уровень.
@@ -3426,6 +3977,8 @@ window.App = (() => {
       session = { levelNum, params };
       Render.renderAll();
       Render.hideWin();
+      // Analytics: начало уровня.
+      Analytics.event('level_start', { level_num: levelNum });
       // Туториал — только на L1, и только если игрок ещё не прошёл ни одного уровня.
       if (window.Tutorial) Tutorial.maybeStart(levelNum);
     }, 30);
@@ -3580,6 +4133,12 @@ window.App = (() => {
     const s = State.get();
     winLocked = true; // блокируем поле пока открыт модал победы
     const persisted = Persist.load();
+    // Analytics: level_complete. s.level — текущий уровень, s.moves — кол-во
+    // ходов, persisted.totalCompleted ещё ДО инкремента ниже.
+    Analytics.event('level_complete', {
+      level_num: s ? s.level : 1,
+      moves: s ? s.moves : 0
+    });
     persisted.totalCompleted = (persisted.totalCompleted || 0) + 1;
     persisted.stats.totalMoves = (persisted.stats.totalMoves || 0) + (s ? s.moves : 0);
     // Следующий уровень сохраним заранее, чтобы перезагрузка после победы
@@ -3597,6 +4156,12 @@ window.App = (() => {
     if (window.Ads) {
       if (Ads.preloadInterstitial) { try { Ads.preloadInterstitial(); } catch (_e) {} }
       if (Ads.preloadRewarded)     { try { Ads.preloadRewarded();     } catch (_e) {} }
+    }
+    // Push: переплан расписания после пройденного уровня. Permission уже
+    // запросили при первом запуске app (см. App.start), здесь только refresh.
+    if (window.PushScheduler && persisted.pushEnabled !== false
+        && PushScheduler.getPermissionState() === 'granted') {
+      PushScheduler.refresh();
     }
     Render.showWin(`Молодец! Готов к уровню ${persisted.level}?`);
   }
@@ -3639,20 +4204,22 @@ window.App = (() => {
     }
     const onRate = () => {
       detachRateUsHandlers();
+      Analytics.event('rate_clicked', { source: 'modal' });
       const p = Persist.load();
       p.rateUsCompleted = true;
       Persist.save(p);
-      // Переход на страницу приложения в RuStore. Capacitor WebView
-      // ловит target='_blank' и через Intent.ACTION_VIEW открывает
-      // URL — на устройстве с установленным RuStore это запустит
-      // нативное приложение RuStore сразу на странице игры (deep-link),
-      // на устройстве без RuStore — откроется в системном браузере.
-      try {
-        window.open('https://www.rustore.ru/catalog/app/com.terekh.glittersort',
-                    '_blank', 'noopener,noreferrer');
-      } catch (_e) {}
+      // 1) Закрываем модалку СРАЗУ — RuStore SDK покажет свой нативный диалог
+      //    поверх WebView, наша модалка не должна оставаться видимой под ним.
       Render.hideRateUs();
       callback();
+      // 2) Fire-and-forget вызов нативного диалога оценки. Результат логируем,
+      //    в UX не возвращаем — SDK сам обрабатывает жизненный цикл.
+      //    RuStoreReviewClient делает fallback на deep-link, если bridge нет
+      //    (browser dev / APK без -RuStoreReviewSdk) или SDK вернул 'unavailable'.
+      //    'failed' (уже оценивал / лимит) — silent, не теребим юзера.
+      RuStoreReviewClient.launch().then(r => {
+        console.log('[rateUs] RuStore review result:', r);
+      }).catch(e => console.warn('[rateUs] RuStore review threw:', e));
     };
     const onLater = () => {
       detachRateUsHandlers();
@@ -3703,11 +4270,21 @@ window.App = (() => {
     if (s.sticks.length >= 13) { Render.toast('Больше колб не помещается'); return; }
     Render.toast('Реклама...', 1500);
     Ads.showRewarded().then(res => {
-      if (!res || !res.rewarded) { Render.toast('Реклама не была досмотрена'); return; }
+      const watched = !!(res && res.rewarded);
+      // Analytics: rewarded shown (placement=revive — +1 колба).
+      Analytics.adShown({
+        type: 'rewarded',
+        placement: 'revive',
+        watched: watched,
+        rewardGiven: watched
+      });
+      if (!watched) { Render.toast('Реклама не была досмотрена'); return; }
       if (State.addBonusBottle()) {
         const persisted = Persist.load();
         persisted.stats.bonusUsed = (persisted.stats.bonusUsed || 0) + 1;
         Persist.save(persisted);
+        // Analytics: revive_used (per-app event).
+        Analytics.event('revive_used', { level_num: s.level });
         flagInterstitialTrigger();
         Render.renderAll();
         Render.toast('+1 колба (бонус)');

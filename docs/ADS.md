@@ -16,8 +16,8 @@
 | **Rewarded** | По клику «+ Колба» в bottom bar | `Ads.showRewarded()` | `Ads.UNIT_REWARDED` |
 
 Unit-ID в коде:
-- Interstitial: `R-M-19273571-2`
-- Rewarded: `R-M-19273571-1`
+- Interstitial: `R-M-19273487-1`
+- Rewarded: `R-M-19273487-2`
 
 Источник: [Yandex Partner Mobile Ads](https://partner.yandex.ru/mobile-ads).
 
