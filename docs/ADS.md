@@ -12,8 +12,22 @@
 
 | Слот | Когда показывается | Метод | Конст. ID |
 |---|---|---|---|
-| **Interstitial** | Между уровнями, каждые 2 победы (см. `Persist.shouldShowInterstitial`) | `Ads.showInterstitial()` | `Ads.UNIT_INTERSTITIAL` |
+| **Interstitial** | ⛔ **Временно отключён** (`Ads.INTERSTITIAL_ENABLED = false`) | `Ads.showInterstitial()` | `Ads.UNIT_INTERSTITIAL` |
 | **Rewarded** | По клику «+ Колба» в bottom bar | `Ads.showRewarded()` | `Ads.UNIT_REWARDED` |
+
+### ⛔ Межстраничная реклама выключена
+
+Флаг `INTERSTITIAL_ENABLED` в начале блока `[ADS]` (`index.html`). Причина: в отзывах в РуСторе игроки жалуются именно на межстраничную рекламу, а её доход почти нулевой на фоне rewarded.
+
+Что делает флаг при `false`:
+
+- `Ads.showInterstitial()` резолвится сразу, не трогая SDK;
+- `Ads.preloadInterstitial()` — no-op, интерстишл не прогревается ни на старте (`Ads.init`), ни на победе (`App.onWin`);
+- `App.shouldShowInterstitialNow()` всегда возвращает `false`;
+- recovery-путь в `App.start()` не запускается, а протухший `interstitialPendingAt` из сейва просто чистится (важно для игроков, обновившихся со старой версии);
+- событие аналитики `ad_interstitial_shown` больше не отправляется.
+
+**Вернуть рекламу** = поставить `INTERSTITIAL_ENABLED = true`. Вся политика показа (уровень ≥ 5, флаг «дёргал уровень», cooldown 2 мин, recovery 5 мин, safety-timeout 90 с) сохранена в `[APP]` и оживёт без других правок.
 
 Unit-ID в коде:
 - Interstitial: `R-M-19273487-1`

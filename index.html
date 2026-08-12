@@ -1931,6 +1931,15 @@ window.Ads = (() => {
   const UNIT_INTERSTITIAL = 'R-M-19273487-1';
   const UNIT_REWARDED     = 'R-M-19273487-2';
 
+  // ===== ВРЕМЕННЫЙ ВЫКЛЮЧАТЕЛЬ МЕЖСТРАНИЧНОЙ РЕКЛАМЫ =====
+  // false — интерстишл не показывается и не прогревается вообще.
+  // Причина: в отзывах игроки жалуются именно на межстраничную рекламу,
+  // а её доход почти нулевой на фоне rewarded («+1 колба»). Rewarded
+  // продолжает работать в полном объёме.
+  // Чтобы вернуть — просто поставь true: вся политика показа в [APP]
+  // цела (shouldShowInterstitialNow, cooldown, recovery, аналитика).
+  const INTERSTITIAL_ENABLED = false;
+
   // Таймаут на ожидание callback'а от Java. Страховка от молчаливого
   // зависания SDK (нет fill / нет сети / unit на модерации). 120 сек —
   // Yandex rewarded видео макс ~60 сек + закрытие, interstitial 10-15 сек.
@@ -1963,9 +1972,11 @@ window.Ads = (() => {
         }
       };
       console.log('[Ads] backend=native (YandexAds bridge)');
-      // Preload первой пары реклам, чтобы первый показ был мгновенным.
+      // Preload при старте, чтобы первый показ был мгновенным.
+      // Интерстишл не прогреваем пока INTERSTITIAL_ENABLED=false — незачем
+      // жечь запросы к SDK за рекламу, которую мы не покажем.
       try {
-        window.YandexAds.preloadInterstitial(UNIT_INTERSTITIAL);
+        if (INTERSTITIAL_ENABLED) window.YandexAds.preloadInterstitial(UNIT_INTERSTITIAL);
         window.YandexAds.preloadRewarded(UNIT_REWARDED);
       } catch (e) { console.warn('[Ads] preload skipped:', e); }
       return Promise.resolve();
@@ -1993,8 +2004,10 @@ window.Ads = (() => {
    *   2) в App.onWin (модал победы — даём 1-2с на подгрузку до клика
    *      «Дальше»);
    *   3) автоматически после каждого showInterstitial (см. ниже).
+   * При INTERSTITIAL_ENABLED=false — no-op на любом backend'е.
    */
   function preloadInterstitial() {
+    if (!INTERSTITIAL_ENABLED) return;
     if (backend === 'native' && window.YandexAds && typeof window.YandexAds.preloadInterstitial === 'function') {
       try { window.YandexAds.preloadInterstitial(UNIT_INTERSTITIAL); } catch (e) {}
     }
@@ -2016,6 +2029,13 @@ window.Ads = (() => {
   }
 
   function showInterstitial() {
+    // Вторая линия обороны: App и так не зовёт показ при выключенном
+    // флаге (shouldShowInterstitialNow), но если какой-то путь всё же
+    // сюда дойдёт — резолвим сразу, без показа и без preload'а.
+    if (!INTERSTITIAL_ENABLED) {
+      console.log('[Ads] interstitial disabled — skip');
+      return Promise.resolve();
+    }
     const promise = (() => {
       if (backend === 'native') {
         return new Promise(resolve => {
@@ -2106,7 +2126,8 @@ window.Ads = (() => {
 
   function getBackend() { return backend; }
 
-  return { init, showInterstitial, preloadInterstitial, showRewarded, preloadRewarded, getBackend, UNIT_INTERSTITIAL, UNIT_REWARDED };
+  return { init, showInterstitial, preloadInterstitial, showRewarded, preloadRewarded, getBackend,
+           INTERSTITIAL_ENABLED, UNIT_INTERSTITIAL, UNIT_REWARDED };
 })();
 
 /* ============================================================
@@ -3762,6 +3783,9 @@ window.App = (() => {
   let rateUsShownThisSession = false;
 
   // ===== Интерстишл политика =====
+  // ⚠️ СЕЙЧАС МЕЖСТРАНИЧНАЯ ВЫКЛЮЧЕНА глобально: Ads.INTERSTITIAL_ENABLED
+  // === false (см. комментарий в [ADS]). Политика ниже сохранена целиком
+  // и оживёт сразу, как только флаг вернут в true.
   // 1) Показываем только после прохождения 5+ уровня
   // 2) Только если игрок «дёргал» уровень (undo / +колба за рекламу)
   // 3) Cooldown 2 мин между показами; cooldown сбрасывается при перезапуске
@@ -3776,6 +3800,8 @@ window.App = (() => {
   let lastInterstitialAtMs = 0;
 
   function shouldShowInterstitialNow(justCompletedLevel, flagged) {
+    // Глобальный выключатель — межстраничная временно отключена.
+    if (!window.Ads || !Ads.INTERSTITIAL_ENABLED) return false;
     if (!flagged) return false;
     if (justCompletedLevel < INTERSTITIAL_MIN_COMPLETED_LEVEL) return false;
     if (Date.now() - lastInterstitialAtMs < INTERSTITIAL_COOLDOWN_MS) return false;
@@ -3872,8 +3898,12 @@ window.App = (() => {
 
     // Recovery: если меньше 5 минут назад был неотданный интерстишл —
     // показываем его сейчас и только потом грузим уровень.
+    // При выключенной межстраничной recovery не запускаем вообще, а флаг
+    // чистим ниже: у игроков, обновившихся с прошлой версии, в сейве мог
+    // остаться interstitialPendingAt — иначе первый же запуск новой
+    // версии встретил бы их именно той рекламой, которую мы убираем.
     const pendingAt = Persist.loadInterstitialPending();
-    if (pendingAt && Date.now() - pendingAt < INTERSTITIAL_RECOVERY_MS) {
+    if (pendingAt && Ads.INTERSTITIAL_ENABLED && Date.now() - pendingAt < INTERSTITIAL_RECOVERY_MS) {
       console.log('[Ads] recovery: показываем недосмотренный интерстишл');
       wireEvents();
       await presentInterstitialThenLoad(persisted.level || 1);
@@ -4150,12 +4180,16 @@ window.App = (() => {
     Persist.save(persisted);
     sessionCompletedCount++;
     // Прогреваем рекламу на фоне, пока игрок читает модал победы:
-    //   - interstitial — для возможного показа между уровнями;
-    //   - rewarded — игрок может нажать «+колба» сразу после loadLevel.
+    //   - rewarded — игрок может нажать «+колба» сразу после loadLevel;
+    //   - interstitial — только если он вообще включён (сейчас нет,
+    //     Ads.preloadInterstitial сам делает no-op, но не зовём и здесь,
+    //     чтобы намерение читалось в коде).
     // На native — реальный preload в Yandex SDK; на yagames/mock — no-op.
     if (window.Ads) {
-      if (Ads.preloadInterstitial) { try { Ads.preloadInterstitial(); } catch (_e) {} }
-      if (Ads.preloadRewarded)     { try { Ads.preloadRewarded();     } catch (_e) {} }
+      if (Ads.INTERSTITIAL_ENABLED && Ads.preloadInterstitial) {
+        try { Ads.preloadInterstitial(); } catch (_e) {}
+      }
+      if (Ads.preloadRewarded) { try { Ads.preloadRewarded(); } catch (_e) {} }
     }
     // Push: переплан расписания после пройденного уровня. Permission уже
     // запросили при первом запуске app (см. App.start), здесь только refresh.

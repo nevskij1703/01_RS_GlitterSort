@@ -47,8 +47,13 @@
 3. Создаст `YandexAdsBridge.java` рядом с MainActivity.
 4. Перепишет `MainActivity.java` чтобы вызвать `MobileAds.initialize(...)` + `addJavascriptInterface(new YandexAdsBridge(...), "YandexAds")`.
 
+### ⛔ Межстраничная реклама временно выключена
+
+`INTERSTITIAL_ENABLED = false` в начале блока `[ADS]` (`index.html`). Причина: жалобы игроков в отзывах РуСтора при почти нулевом доходе от этого формата. Rewarded («+1 колба») работает как раньше. Подробности — [docs/ADS.md](docs/ADS.md) → «Межстраничная реклама выключена».
+
 ### Правила (для будущих сессий)
 
+- **НЕ «чини»** отсутствие межстраничной рекламы — это осознанное решение. Единственный способ вернуть — поставить `INTERSTITIAL_ENABLED = true` по явной просьбе Александра. Политику показа в `[APP]` (уровень ≥ 5, cooldown, recovery) **не удаляй** — она ждёт возврата флага.
 - **НЕ возвращай** demo-IDs `R-M-DEMO-1/2` — они были у Яндекса в их примерах и не работают в production.
 - **НЕ подключай** веб-SDK Yandex Games (`https://yandex.ru/games/sdk/...`) — в РуСтор APK он не используется.
 - **НЕ убирай** mock-fallback из `Ads.init` — он нужен для dev-режима в браузере.
