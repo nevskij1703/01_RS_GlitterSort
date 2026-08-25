@@ -668,7 +668,7 @@ body{
    GlitterSort — single-file game logic
    ------------------------------------------------------------
    Sections (Ctrl+F to jump):
-     [LEVELS]   Палитра, дефолтные уровни, генераторы, endless
+     [LEVELS]   Палитра, кривая сложности, генерация уровней под цель
      [SOLVER]   BFS-решатель, dead-end detection
      [STATE]    Игровое состояние, ходы, undo, win-проверка
      [PERSIST]  localStorage save/load
@@ -844,8 +844,11 @@ window.Solver = (() => {
 })();
 
 /* ============================================================
-   [LEVELS] — палитра, 10 ручных уровней, генераторы V1/V2,
-   endless mode.
+   [LEVELS] — палитра, кривая сложности и генерация уровней.
+   Готовых уровней нет: каждый собирается на лету под целевое число
+   ходов (см. CURVE_PREFIX/CURVE_CYCLE + RATING_PRESETS).
+   Генераторы V1 (reverse-shuffle) и V2 (random-tuned) остались для
+   дев-панели и как фолбэк.
    Portирован из RC_Colbs_v2/game/levels.js, адаптирован
    под палитру 8 цветов и ограничение "2-4 цвета максимум".
    ============================================================ */
@@ -864,69 +867,85 @@ window.Levels = (() => {
     cyan:'#22ddff', mint:'#5be3a0',   coral:'#ff7b6b',
   };
 
-  // 10 default levels. КРИТИЧЕСКОЕ ПРАВИЛО:
-  //   colors_count === filled === sticks - emptyStick
-  // Каждый цвет занимает ровно ОДНУ полную колбу (capacity единиц).
-  // Никогда не должно быть 2+ полных колб одного цвета.
-  // Прогрессия — увеличение sticks/capacity/colors, всегда emptyStick=1.
-  // Прогрессия от 3 ходов (L1) до 31-32 ходов (L10), emptyStick=1, без бонуса.
-  // ВСЕ bottles предгенерированы и захардкожены — одинаковы у всех игроков,
-  // нет тяжёлой генерации на устройстве. Если когда-нибудь придётся
-  // регенерировать — generator/seed/difficulty/tuningTimeoutMs оставлены
-  // как метаданные, generate() их использует, только если bottles нет.
-  // Оптимум каждого уровня указан в комментарии (проверено BFS-solver).
-  const DEFAULT_LEVELS = [
-    // L1 — туториал, optimal=3
-    { level: 1,  sticks: 3,  capacity: 2, emptyStick: 1, difficulty: 3,
-      colours: ['pink','blue'],
-      generator:'random-tuned', tuningTimeoutMs: 3000, seed: 1001,
-      bottles: [['pink','blue'],['blue','pink'],[]] },
-    // L2 — optimal=4
-    { level: 2,  sticks: 4,  capacity: 2, emptyStick: 1, difficulty: 6,
-      colours: ['pink','blue','orange'],
-      generator:'random-tuned', tuningTimeoutMs: 3000, seed: 2001,
-      bottles: [['pink','orange'],['blue','pink'],['orange','blue'],[]] },
-    // L3 — optimal=8
-    { level: 3,  sticks: 4,  capacity: 3, emptyStick: 1, difficulty: 9,
-      colours: ['pink','blue','orange'],
-      generator:'random-tuned', tuningTimeoutMs: 4000, seed: 3001,
-      bottles: [['pink','blue','pink'],['orange','blue','orange'],['pink','blue','orange'],[]] },
-    // L4 — optimal=10
-    { level: 4,  sticks: 5,  capacity: 3, emptyStick: 1, difficulty: 12,
-      colours: ['pink','blue','orange','lime'],
-      generator:'random-tuned', tuningTimeoutMs: 4000, seed: 4001,
-      bottles: [['lime','orange','lime'],['pink','orange','blue'],['pink','lime','pink'],['blue','orange','blue'],[]] },
-    // L5 — optimal=13
-    { level: 5,  sticks: 6,  capacity: 3, emptyStick: 1, difficulty: 15,
-      colours: ['pink','orange','yellow','lime','teal'],
-      generator:'random-tuned', tuningTimeoutMs: 5000, seed: 5001,
-      bottles: [['lime','teal','yellow'],['yellow','orange','teal'],['yellow','orange','pink'],['teal','lime','pink'],['lime','orange','pink'],[]] },
-    // L6 — optimal=18
-    { level: 6,  sticks: 7,  capacity: 4, emptyStick: 1, difficulty: 18,
-      colours: ['pink','orange','yellow','lime','teal','blue'],
-      generator:'random-tuned', tuningTimeoutMs: 5000, seed: 6001,
-      bottles: [['pink','lime','yellow','lime'],['teal','blue','lime','orange'],['orange','pink','teal','yellow'],['blue','teal','pink','blue'],['teal','orange','orange','lime'],['yellow','pink','yellow','blue'],[]] },
-    // L7 — optimal=22
-    { level: 7,  sticks: 8,  capacity: 4, emptyStick: 1, difficulty: 22,
-      colours: ['pink','orange','yellow','lime','teal','blue','purple'],
-      generator:'random-tuned', tuningTimeoutMs: 6000, seed: 7001,
-      bottles: [['yellow','blue','teal','blue'],['lime','pink','blue','teal'],['lime','yellow','purple','pink'],['blue','teal','orange','pink'],['yellow','purple','yellow','teal'],['pink','lime','orange','purple'],['orange','orange','purple','lime'],[]] },
-    // L8 — optimal=25
-    { level: 8,  sticks: 9,  capacity: 4, emptyStick: 1, difficulty: 25,
-      colours: ['pink','orange','yellow','lime','teal','blue','purple','crimson'],
-      generator:'random-tuned', tuningTimeoutMs: 8000, seed: 8001,
-      bottles: [['pink','crimson','blue','lime'],['purple','pink','purple','crimson'],['orange','orange','yellow','orange'],['lime','lime','crimson','teal'],['purple','yellow','teal','teal'],['yellow','teal','blue','pink'],['lime','blue','pink','blue'],['crimson','purple','yellow','orange'],[]] },
-    // L9 — optimal=28
-    { level: 9,  sticks: 10, capacity: 4, emptyStick: 1, difficulty: 28,
-      colours: ['pink','orange','yellow','lime','teal','blue','purple','crimson','cyan'],
-      generator:'random-tuned', tuningTimeoutMs: 8000, seed: 9001,
-      bottles: [['pink','yellow','cyan','yellow'],['yellow','purple','teal','lime'],['cyan','teal','blue','purple'],['teal','blue','yellow','orange'],['lime','orange','lime','pink'],['orange','lime','crimson','teal'],['cyan','orange','purple','crimson'],['purple','crimson','pink','cyan'],['crimson','pink','blue','blue'],[]] },
-    // L10 — optimal=31 (целились в 32; BFS остановился на 31 за 10с)
-    { level: 10, sticks: 12, capacity: 4, emptyStick: 1, difficulty: 32,
-      colours: ['pink','orange','yellow','lime','teal','blue','purple','crimson','cyan','mint','coral'],
-      generator:'random-tuned', tuningTimeoutMs: 10000, seed: 10001,
-      bottles: [['yellow','teal','pink','lime'],['teal','crimson','teal','blue'],['pink','yellow','blue','blue'],['lime','purple','lime','purple'],['orange','orange','pink','coral'],['yellow','orange','yellow','blue'],['purple','coral','purple','crimson'],['coral','cyan','pink','mint'],['cyan','mint','crimson','teal'],['mint','cyan','cyan','orange'],['crimson','lime','coral','mint'],[]] },
-  ];
+  // ===== КРИВАЯ СЛОЖНОСТИ =====
+  // Уровни НЕ хранятся готовыми — каждый генерируется на лету под заданную
+  // сложность. Сложность уровня — рейтинг 1..10, где 1 = 3 хода в оптимальном
+  // решении, 10 = 24 хода (линейная шкала, RATING_PRESETS[r].moves).
+  //
+  // Порядок рейтингов по номерам уровней:
+  //   L1..L4 — разгон:  1, 3, 3, 6
+  //   L5+    — цикл:    4, 4, 7, 4, 4, 10   (повторяется бесконечно)
+  // То есть 1-3-3-6 | 4-4-7-4-4-10 | 4-4-7-4-4-10 | ...
+  // Ритм цикла: два лёгких, один потяжелее, два лёгких, один пиковый.
+  const CURVE_PREFIX = [1, 3, 3, 6];
+  const CURVE_CYCLE  = [4, 4, 7, 4, 4, 10];
+  function ratingFor(n) {
+    const i = (n | 0) - 1;
+    if (i <= 0) return CURVE_PREFIX[0];
+    if (i < CURVE_PREFIX.length) return CURVE_PREFIX[i];
+    return CURVE_CYCLE[(i - CURVE_PREFIX.length) % CURVE_CYCLE.length];
+  }
+
+  // Пресет рейтинга: сколько ходов должно быть в оптимальном решении (moves)
+  // и на каком поле такой оптимум реально встречается.
+  //
+  // Поля подобраны замерами (методика и таблицы — docs/LEVELS.md). Ключевое
+  // наблюдение: при ОДНОЙ пустой колбе большинство случайных раскладок
+  // нерешаемы, но BFS отбраковывает их за единицы миллисекунд, а те, что
+  // решаемы, дают предсказуемый оптимум. Поэтому генерация = сэмплирование
+  // случайных раскладок + BFS, а не «перемешивание из решённого» (оно
+  // упирается в потолок ~16-19 ходов и не даёт тяжёлый конец шкалы).
+  //
+  // budgetMs/maxAttempts — потолок на подбор; выходим раньше при точном
+  // попадании в цель. Замеры на 25 сидах на рейтинг: 1..7 попадают точно
+  // всегда, 8..10 — среднее отклонение < 0.4 хода, худший случай ~170 мс.
+  const RATING_PRESETS = {
+    1:  { moves: 3,  sticks: 3,  capacity: 2, budgetMs: 60,  maxAttempts: 60  },
+    2:  { moves: 5,  sticks: 5,  capacity: 2, budgetMs: 60,  maxAttempts: 80  },
+    3:  { moves: 8,  sticks: 5,  capacity: 3, budgetMs: 80,  maxAttempts: 120 },
+    4:  { moves: 10, sticks: 6,  capacity: 3, budgetMs: 100, maxAttempts: 150 },
+    5:  { moves: 12, sticks: 7,  capacity: 3, budgetMs: 120, maxAttempts: 200 },
+    6:  { moves: 15, sticks: 6,  capacity: 4, budgetMs: 150, maxAttempts: 250 },
+    7:  { moves: 17, sticks: 7,  capacity: 4, budgetMs: 200, maxAttempts: 300 },
+    8:  { moves: 19, sticks: 8,  capacity: 4, budgetMs: 250, maxAttempts: 400 },
+    9:  { moves: 22, sticks: 9,  capacity: 4, budgetMs: 350, maxAttempts: 600 },
+    10: { moves: 24, sticks: 9,  capacity: 4, budgetMs: 400, maxAttempts: 800 },
+  };
+
+  // Параметры уровня n по кривой. Детерминированы по n: до генерации один и
+  // тот же номер даёт одно и то же поле и один и тот же набор цветов.
+  // Инвариант сохраняется: colours === filled === sticks - emptyStick,
+  // то есть каждый цвет — ровно одна полная колба в решённом состоянии.
+  function curveParams(n) {
+    const rating = ratingFor(n);
+    const p = RATING_PRESETS[rating] || RATING_PRESETS[4];
+    const seed = (n * 9173 + 31) | 0;
+    const rng = mulberry32(seed);
+    const filled = p.sticks - 1;
+    return {
+      level: n,
+      rating,
+      sticks: p.sticks,
+      capacity: p.capacity,
+      emptyStick: 1,
+      difficulty: p.moves,      // цель: длина оптимального решения (BFS)
+      colours: shuffleInPlace([...PALETTE], rng).slice(0, filled),
+      generator: 'target-tuned',
+      budgetMs: p.budgetMs,
+      maxAttempts: p.maxAttempts,
+      // Дев-панель показывает бюджет генерации в своём поле «таймаут» и
+      // использует его, когда пересобирает уровень через random-tuned.
+      tuningTimeoutMs: p.budgetMs,
+      seed,
+    };
+  }
+
+  // DEFAULT_LEVELS больше не источник правды и не хранит bottles — это
+  // витрина первых уровней кривой для дев-панели (она их листает и правит,
+  // правки уходят в runtime-override). Всё, что дальше по номерам, считает
+  // curveParams() на лету.
+  const DEFAULT_LEVELS = [];
+  for (let _n = 1; _n <= 24; _n++) DEFAULT_LEVELS.push(curveParams(_n));
 
   const runtimeOverrides = {};
   function setRuntimeOverride(n, cfg) { if (cfg) runtimeOverrides[n] = cfg; else delete runtimeOverrides[n]; }
@@ -995,129 +1014,19 @@ window.Levels = (() => {
     DEFAULT_LEVELS.forEach((lvl, i) => { lvl.level = i + 1; });
   }
 
-  /**
-   * Endless mode (L11+) — параметры зашиты в баланс игры:
-   *   - 1 пустая, capacity всегда 4
-   *   - максимум оптимума линейно от 24 (8 колб) до 42 (12 колб)
-   *   - 50% / 35% / 15% распределение целевой сложности
-   *     (Средне / Сложно / Очень сложно). requireBonus НЕ генерируется —
-   *     все эндлесс-уровни решаемы без +1 колбы.
-   *   - tuningTimeoutMs = 1000 (быстрая генерация)
-   *
-   * Алгоритм генерации:
-   *   1. Roll целевого tier'а по midRatio/hardRatio/extremeRatio.
-   *   2. Выбираем sticks так, чтобы maxOptimal(sticks) ≥ нижней границы
-   *      tier'а: для Средне sticks∈[8..12], для Сложно sticks∈[9..12],
-   *      для Очень сложно sticks∈[10..12]. Иначе генератор просто
-   *      физически не сможет дать нужный оптимум.
-   *   3. Выбираем target difficulty внутри диапазона tier'а
-   *      (но не больше maxOptimal этого числа колб).
-   *
-   * Если генератор за tuningTimeoutMs не дотянул до target —
-   * берём то, что получилось (best.optimalLength). Реальный лейбл
-   * сложности у игрока определяется по фактическому BFS-оптимуму
-   * через Render.getDifficulty(), а не по запрошенному target.
-   *
-   * Конфиг детерминирован по n: один и тот же уровень = одни и те же
-   * параметры. Bottles генерируются генератором и кэшируются в savedRun.
-   */
-  const ENDLESS_CONFIG = {
-    sticksMin: 8,
-    sticksMax: 12,
-    capacity: 4,
-    emptyStick: 1,
-    // Линейная интерполяция максимального оптимума:
-    //   sticks=8  → up to 24
-    //   sticks=12 → up to 42
-    optimalAt8: 24,
-    optimalAt12: 42,
-    tuningTimeoutMs: 1000,
-    // Распределение целевой сложности (сумма == 1):
-    midRatio:     0.50,   // Средне: target 17..24
-    hardRatio:    0.35,   // Сложно: target 25..32
-    extremeRatio: 0.15,   // Очень сложно: target 33..maxOptimal
-  };
-
-  const _endlessCache = {};
-  // Шаги: возвращает maxOptimal для заданного числа колб (линейная
-  // интерполяция между optimalAt8 и optimalAt12). При sticks < 8 или > 12
-  // экстраполяция всё равно работает корректно — но мы клампим число
-  // колб в [sticksMin..sticksMax], так что это безопасно.
-  function _maxOptimalFor(sticks, cfg) {
-    const t = (sticks - 8) / (12 - 8);
-    return Math.round(cfg.optimalAt8 + t * (cfg.optimalAt12 - cfg.optimalAt8));
-  }
-  function generateEndlessConfig(n) {
-    const cfg = ENDLESS_CONFIG;
-    const seed = (n * 9173 + 31) | 0;
-    const rng = mulberry32(seed);
-
-    // 1. Roll целевого tier'а по распределению 50% / 35% / 15%.
-    const tierRoll = rng();
-    let tier;
-    if (tierRoll < cfg.midRatio)                       tier = 'mid';
-    else if (tierRoll < cfg.midRatio + cfg.hardRatio)  tier = 'hard';
-    else                                               tier = 'extreme';
-
-    // 2. Выбираем минимальное число колб, при котором этот tier
-    //    физически достижим (т.е. maxOptimal(sticks) ≥ нижней границы
-    //    диапазона tier'а — 17 / 25 / 33).
-    //    Текущая интерполяция (optimalAt8=24, optimalAt12=42):
-    //      sticks=8  → 24   (mid OK, hard нет, extreme нет)
-    //      sticks=9  → 28-29 (mid+hard OK, extreme нет)
-    //      sticks=10 → 33    (всё OK)
-    //      sticks=11 → 38
-    //      sticks=12 → 42
-    const sticksMinForTier = { mid: 8, hard: 9, extreme: 10 }[tier];
-    const sticksMaxForTier = cfg.sticksMax;
-    const sticksRange = sticksMaxForTier - sticksMinForTier + 1;
-    const sticks = sticksMinForTier + Math.floor(rng() * sticksRange);
-    const filled = sticks - cfg.emptyStick;
-    const maxOptimal = _maxOptimalFor(sticks, cfg);
-
-    // 3. Выбираем target внутри диапазона tier'а (но не выше maxOptimal
-    //    для этого числа колб — иначе target теоретически недостижим).
-    const tierRanges = {
-      mid:     { min: 17, max: Math.min(24, maxOptimal) },
-      hard:    { min: 25, max: Math.min(32, maxOptimal) },
-      extreme: { min: 33, max: maxOptimal },
-    };
-    let range = tierRanges[tier];
-    // Защита от вырожденного диапазона (например, sticks=10, extreme:
-    // min=33, max=33 — единственное значение).
-    if (range.min > range.max) range = { min: range.max, max: range.max };
-    const difficulty = range.min + Math.floor(rng() * (range.max - range.min + 1));
-
-    const colours = shuffleInPlace([...PALETTE], rng).slice(0, filled);
-    return {
-      sticks,
-      capacity: cfg.capacity,
-      emptyStick: cfg.emptyStick,
-      difficulty,
-      colours,
-      generator: 'random-tuned',
-      tuningTimeoutMs: cfg.tuningTimeoutMs,
-      seed,
-      requireBonus: false,   // в endless-уровнях requireBonus отключён —
-                             // все уровни решаемы без +1 колбы за рекламу.
-      endless: true,
-      // Тeg тира — для логов/отладки; реальный лейбл игроку выводится
-      // через Render.getDifficulty(optimalSteps) уже по факту BFS.
-      targetTier: tier,
-    };
-  }
 
   function getParams(n) {
     if (runtimeOverrides[n]) return { ...runtimeOverrides[n], level: n };
     const custom = window.Persist && window.Persist.loadCustomLevel
       ? window.Persist.loadCustomLevel(n) : null;
     if (custom) return { ...custom, level: n };
-    if (n > DEFAULT_LEVELS.length) {
-      if (!_endlessCache[n]) _endlessCache[n] = generateEndlessConfig(n);
-      return { ..._endlessCache[n], level: n };
+    // Первые уровни лежат в DEFAULT_LEVELS (та же кривая, просто
+    // материализованы — чтобы дев-панель могла их листать и править).
+    // Дальше — считаем параметры кривой на лету, конца нет.
+    if (n >= 1 && n <= DEFAULT_LEVELS.length) {
+      return { ...DEFAULT_LEVELS[n - 1], level: n };
     }
-    const idx = Math.max(0, Math.min(DEFAULT_LEVELS.length - 1, n - 1));
-    return { ...DEFAULT_LEVELS[idx], level: n };
+    return curveParams(n);
   }
 
   // -------- PRNG + helpers --------
@@ -1161,6 +1070,10 @@ window.Levels = (() => {
   function generate(params) {
     if (Array.isArray(params.bottles)) {
       return permuteEmptyToEnd(params.bottles.map(s => [...s]));
+    }
+    // Основной путь игры: подбор раскладки под целевое число ходов.
+    if (params.generator === 'target-tuned') {
+      return permuteEmptyToEnd(generateForTarget(params).bottles);
     }
     let bottles;
     const baseSeed = params.seed | 0;
@@ -1264,11 +1177,17 @@ window.Levels = (() => {
       if (src < 0) break;
       let progressed = false;
       for (let step = 0; step < srcSize; step++) {
+        // ВАЖНО: тот же критерий валидности обратного хода, что и выше.
+        // Раньше compact pass просто вываливал фишки в любые колбы —
+        // получалась раскладка, которую прямыми ходами уже не собрать,
+        // то есть генератор мог отдать нерешаемый уровень.
+        const donut = state[src][state[src].length - 1];
+        if (state[src].length > 1 && state[src][state[src].length - 2] !== donut) break;
         const candidates = [];
         for (let j = 0; j < N; j++) if (j !== src && state[j].length < capacity) candidates.push(j);
         if (candidates.length === 0) break;
         const dst = candidates[Math.floor(rng() * candidates.length)];
-        const donut = state[src].pop();
+        state[src].pop();
         state[dst].push(donut);
         visited.add(hashState(state));
         progressed = true;
@@ -1365,6 +1284,78 @@ window.Levels = (() => {
     return { bottles: best.bottles, ..._lastTuningMeta };
   }
 
+  /**
+   * Генератор под ЦЕЛЬ по числу ходов (основной для игры).
+   *
+   * Сэмплим случайные раскладки на поле из пресета рейтинга и меряем
+   * BFS-оптимум. При одной пустой колбе большинство раскладок нерешаемы,
+   * но solver отбрасывает их за единицы мс, а решаемые дают оптимум в
+   * узком диапазоне вокруг того, что нужно (см. docs/LEVELS.md).
+   *
+   * Держим лучшего кандидата по |оптимум − цель| и выходим сразу при
+   * точном попадании. Ограничители: maxAttempts (детерминированный
+   * потолок) и budgetMs (страховка на медленном устройстве) — что
+   * наступит раньше. Замеры: обычно попадаем точно за 0-85 мс.
+   *
+   * Фолбэк (в замерах ни разу не понадобился): если за бюджет не нашли
+   * ни одной решаемой — отдаём раскладку обратным перемешиванием из
+   * решённого состояния. Она заведомо играбельна, просто её сложность
+   * может быть ниже цели.
+   */
+  function generateForTarget(params) {
+    const target = clampDifficulty(params.difficulty);
+    const capacity = params.capacity;
+    const budgetMs = Math.max(30, Math.min(3000, (params.budgetMs | 0) || 200));
+    const maxAttempts = Math.max(10, Math.min(5000, (params.maxAttempts | 0) || 300));
+    const seed = (params.seed != null ? params.seed | 0 : (params.level | 0) * 1000 + 7);
+    const rng = mulberry32(seed);
+    const multiTransfer = params.multiTransfer !== false;
+    // Потолок на ОДИН BFS: нерешаемые исчерпываются мгновенно, решаемые на
+    // наших полях считаются за единицы мс. Кандидат, не уложившийся сюда,
+    // просто пропускается — он всё равно слишком тяжёлый для целей кривой.
+    const SOLVE_CAP_MS = 120;
+    const t0 = performance.now();
+
+    let best = null, attempts = 0, solvableAttempts = 0;
+    while (attempts < maxAttempts && performance.now() - t0 < budgetMs) {
+      attempts++;
+      const layout = randomLayout(params, rng);
+      if (Solver.isSolved(layout, capacity)) continue;
+      const r = Solver.findShortestPath(layout, capacity, SOLVE_CAP_MS, { multiTransfer });
+      if (r.length === null) continue;          // нерешаемо или не уложились
+      solvableAttempts++;
+      const distance = Math.abs(r.length - target);
+      if (!best || distance < best.distance) {
+        best = { bottles: layout, optimalLength: r.length, distance };
+        if (distance === 0) break;
+      }
+    }
+    const elapsedMs = performance.now() - t0;
+
+    if (!best) {
+      const bottles = reverseShuffleFromSolved({ ...params, difficulty: Math.max(4, target) });
+      const check = Solver.findShortestPath(bottles, capacity, SOLVE_CAP_MS, { multiTransfer });
+      _lastTuningMeta = {
+        attempts, solvableAttempts, elapsedMs,
+        optimalLength: Number.isFinite(check.length) ? check.length : null,
+        distance: null, achievedExact: false, fallback: true,
+        requireBonus: false, target,
+      };
+      return { bottles, ..._lastTuningMeta };
+    }
+
+    _lastTuningMeta = {
+      attempts, solvableAttempts, elapsedMs,
+      optimalLength: best.optimalLength,
+      distance: best.distance,
+      achievedExact: best.distance === 0,
+      fallback: false,
+      requireBonus: false,
+      target,
+    };
+    return { bottles: best.bottles, ..._lastTuningMeta };
+  }
+
   function randomLayout(params, rng) {
     const { sticks, capacity, emptyStick } = params;
     const filled = sticks - emptyStick;
@@ -1384,9 +1375,10 @@ window.Levels = (() => {
   function getLastTuningMeta() { return _lastTuningMeta; }
 
   return {
-    PALETTE, COLOR_HEX, DEFAULT_LEVELS, ENDLESS_CONFIG,
+    PALETTE, COLOR_HEX, DEFAULT_LEVELS,
+    CURVE_PREFIX, CURVE_CYCLE, RATING_PRESETS, ratingFor, curveParams,
     getParams, generate,
-    generateRandomTuned, getLastTuningMeta,
+    generateRandomTuned, generateForTarget, getLastTuningMeta,
     setRuntimeOverride, clearRuntimeOverride, getRuntimeOverride,
     getAllRuntimeOverrides, clearAllRuntimeOverrides,
     insertLevelAfter, removeLevel, getLevelCount,
@@ -2487,9 +2479,12 @@ window.Render = (() => {
   //   ≤ 24 — Средне
   //   ≤ 32 — Сложно
   //   >  32 — Очень сложно (Infinity)
+  // Этот путь остался для сейвов, сделанных до перехода на кривую, и
+  // для раскладок из дев-панели: у них нет рейтинга. Основной лейбл
+  // считает getDifficultyByRating ниже.
   // requireBonus (если кто-то выставил через дев-панель) форсит
-  // «Очень сложно» независимо от оптимума. В endless requireBonus
-  // больше не генерируется — все уровни решаемы.
+  // «Очень сложно» независимо от оптимума. Кривая его не выставляет —
+  // все уровни решаемы без бонусной колбы.
   // Если решатель не уложился в timeout (optimalSteps === null),
   // fallback — «Сложно» (предпоследний tier): обычно это значит
   // что поиск глубокий, но мы не пугаем «Очень сложно».
@@ -2505,6 +2500,29 @@ window.Render = (() => {
     if (requireBonus) return DIFF_REQUIRES_BONUS;
     if (optimalSteps == null) return DIFF_TIERS[DIFF_TIERS.length - 2]; // fallback: «Сложно»
     return DIFF_TIERS.find(t => optimalSteps <= t.maxSteps);
+  }
+
+  // Лейбл по рейтингу кривой (1..10) — основной путь после перехода на
+  // генерацию под цель. Шкала рейтингов сжата (10 = 24 хода), поэтому
+  // старые пороги DIFF_TIERS по числу ходов тут не годятся: они бы
+  // назвали самый сложный уровень игры «Средне».
+  // Пары рейтингов на ступень: 1-2 / 3-4 / 5-6 / 7-8 / 9-10.
+  const DIFF_BY_RATING = [
+    null,                                              // индекс 0 не используется
+    { name:'Очень просто', color:'#7be37b' },          // 1
+    { name:'Очень просто', color:'#7be37b' },          // 2
+    { name:'Просто',       color:'#c5e35b' },          // 3
+    { name:'Просто',       color:'#c5e35b' },          // 4
+    { name:'Средне',       color:'#ffd23f' },          // 5
+    { name:'Средне',       color:'#ffd23f' },          // 6
+    { name:'Сложно',       color:'#ff8a2b' },          // 7
+    { name:'Сложно',       color:'#ff8a2b' },          // 8
+    { name:'Очень сложно', color:'#ef3a5d' },          // 9
+    { name:'Очень сложно', color:'#ef3a5d' },          // 10
+  ];
+  function getDifficultyByRating(rating) {
+    const r = Math.max(1, Math.min(10, rating | 0));
+    return DIFF_BY_RATING[r];
   }
 
   /**
@@ -2772,10 +2790,13 @@ window.Render = (() => {
     $hudLevel.textContent = s.level;
     if ($hudMoves) $hudMoves.textContent = s.moves;
     if ($hudDiff) {
-      // Сложность — из мета уровня (App.loadLevel запихивает на state в момент
-      // генерации). Если по каким-то причинам ещё не выставлена — fallback в
-      // getDifficulty вернёт «Сложно».
-      const d = getDifficulty(s.optimalSteps, s.requireBonus);
+      // Сложность — из мета уровня (App.loadLevel кладёт её на state в момент
+      // генерации). Основной источник — рейтинг кривой (1..10). Старый путь
+      // по числу ходов остаётся для сейвов, сделанных до перехода на кривую,
+      // и для раскладок из дев-панели, у которых рейтинга нет.
+      const d = (s.rating != null)
+        ? getDifficultyByRating(s.rating)
+        : getDifficulty(s.optimalSteps, s.requireBonus);
       $hudDiff.textContent = d.name;
       $hudDiff.style.setProperty('--diff-color', d.color);
     }
@@ -2987,7 +3008,7 @@ window.Render = (() => {
   }
 
   return { renderAll, renderHud, renderActionButtons, showWin, hideWin, toast,
-           animatePour, getDifficulty, showRateUs, hideRateUs, isBusyBottle };
+           animatePour, getDifficulty, getDifficultyByRating, showRateUs, hideRateUs, isBusyBottle };
 })();
 
 /* HTML2APK:DEV_ONLY */
@@ -3960,11 +3981,15 @@ window.App = (() => {
       //   3) fallback — отдельный BFS с timeout=1500мс. Используется только
       //      для legacy-уровней и V1 reverse-shuffle (он мету не считает).
       // ВАЖНО: «Очень сложно» теперь определяется по optimalSteps > 32,
-      // а не по requireBonus. requireBonus в endless больше не выставляется,
-      // но если кто-то форсит его через дев-панель — getDifficulty всё
-      // равно сразу вернёт «Очень сложно».
+      // а не по requireBonus. Кривая requireBonus не выставляет, но если
+      // кто-то форсит его через дев-панель — getDifficulty всё равно
+      // сразу вернёт «Очень сложно».
       const s = State.get();
       s.requireBonus = params.requireBonus === true;
+      // Рейтинг кривой (1..10) — то, ПОД ЧТО уровень генерировался. HUD
+      // показывает лейбл именно по нему, а optimalSteps ниже — то, что
+      // реально получилось (для дев-панели и аналитики).
+      s.rating = (params.rating != null) ? params.rating : null;
       const savedMeta = window.Persist && window.Persist.loadGenMeta
         ? window.Persist.loadGenMeta(levelNum) : null;
       const tuningMeta = (window.Levels && Levels.getLastTuningMeta)
@@ -4002,6 +4027,7 @@ window.App = (() => {
         interstitialFlagged: false,
         optimalSteps: s.optimalSteps,
         requireBonus: s.requireBonus,
+        rating: s.rating,
       });
 
       session = { levelNum, params };
@@ -4033,6 +4059,9 @@ window.App = (() => {
     s.interstitialFlagged = !!savedRun.interstitialFlagged;
     s.optimalSteps = savedRun.optimalSteps;
     s.requireBonus = !!savedRun.requireBonus;
+    // rating может отсутствовать в сейвах, сделанных до перехода на кривую —
+    // тогда HUD откатится на лейбл по числу ходов (renderHud).
+    s.rating = (savedRun.rating != null) ? savedRun.rating : null;
     // initial — нужен для определения «уровень в исходном состоянии».
     s.initial = savedRun.initialBottles.map(b => [...b]);
 
