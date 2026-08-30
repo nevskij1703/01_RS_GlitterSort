@@ -1562,6 +1562,14 @@ window.Migrations = (() => {
       }
       return state;
     },
+    4: (state) => {
+      // v3 → v4: Rate-us переехал на политику по номерам уровней
+      // (L5, L8, L11, …), одноразовый L3-триггер удалён вместе со своим
+      // флагом. Поле в сейве больше не читается — чистим, чтобы не
+      // осталось мусора, который потом никто не сможет объяснить.
+      if ('rateUsShownAtL3' in state) delete state.rateUsShownAtL3;
+      return state;
+    },
   };
 
   function getCurrentSchemaVersion() {
@@ -1607,11 +1615,12 @@ window.Persist = (() => {
     // в приложение восстанавливал поле и позволял делать «Ход назад» до
     // начала уровня. Очищается при победе.
     savedRun: null,
-    // RateUs: счётчик игровых сессий (App.start инкрементит); флаг что
-    // L3-триггер уже отстрелял (одноразовый); флаг что игрок нажал
-    // «Оценить» (после этого окно больше не показывается никогда).
+    // sessionCount — счётчик запусков приложения (App.start инкрементит).
+    // На показ Rate-us больше не влияет (политика теперь по номерам
+    // уровней), остаётся как статистика.
     sessionCount: 0,
-    rateUsShownAtL3: false,
+    // rateUsCompleted — игрок нажал «Оценить»; после этого окно не
+    // показывается никогда. См. migration[4] про удалённый rateUsShownAtL3.
     rateUsCompleted: false,
     // Push-уведомления. См. migration[2] и [PUSH_SCHEDULER] блок.
     pushEnabled: true,
@@ -4230,20 +4239,21 @@ window.App = (() => {
   }
 
   // ===== Rate-us политика =====
-  // Показ окна Rate-us, если выполняется одно из условий:
-  //   (A) Только что пройден L3 (одноразовый триггер, persisted.rateUsShownAtL3).
-  //   (B) Это 2-й уровень в текущей сессии И сессия не первая.
-  // Никогда не показываем, если:
-  //   - игрок уже хоть раз нажал «Оценить» (persisted.rateUsCompleted);
-  //   - окно уже показывалось в этой сессии (rateUsShownThisSession).
+  // Показываем окно после прохождения уровней 5, 8, 11, 14, … — первый раз
+  // после L5, дальше каждый третий уровень. Номер сессии роли не играет:
+  // показываем и в самой первой (раньше первая сессия была исключена).
+  // Ограничители остаются прежними:
+  //   - не чаще одного раза за запуск приложения (rateUsShownThisSession);
+  //   - никогда, если игрок уже нажимал «Оценить» (persisted.rateUsCompleted).
+  // Порядок в onNext тоже прежний: Rate-us → интерстишл → загрузка уровня.
+  const RATEUS_FIRST_LEVEL = 5;   // первый показ — после прохождения L5
+  const RATEUS_EVERY       = 3;   // дальше каждые 3 уровня: L8, L11, L14, …
   function shouldShowRateUs(justCompletedLevel) {
     if (rateUsShownThisSession) return false;
     const persisted = Persist.load();
     if (persisted.rateUsCompleted) return false;
-    const triggerL3 = justCompletedLevel === 3 && !persisted.rateUsShownAtL3;
-    const triggerSession = (persisted.sessionCount || 0) > 1
-                        && sessionCompletedCount === 1;
-    return triggerL3 || triggerSession;
+    if (justCompletedLevel < RATEUS_FIRST_LEVEL) return false;
+    return (justCompletedLevel - RATEUS_FIRST_LEVEL) % RATEUS_EVERY === 0;
   }
 
   /**
@@ -4259,13 +4269,6 @@ window.App = (() => {
    */
   function showRateUsThen(callback) {
     rateUsShownThisSession = true;
-    const persisted = Persist.load();
-    // L3-триггер — одноразовый; помечаем сразу при показе.
-    const s = State.get();
-    if (s && s.level === 3) {
-      persisted.rateUsShownAtL3 = true;
-      Persist.save(persisted);
-    }
     const onRate = () => {
       detachRateUsHandlers();
       Analytics.event('rate_clicked', { source: 'modal' });

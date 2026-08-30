@@ -6,7 +6,7 @@ LocalStorage-ключ: `glitterSort.v1`. Единый JSON:
 
 ```json
 {
-  "schemaVersion": 1,
+  "schemaVersion": 4,
   "level": 5,
   "totalCompleted": 4,
   "interstitialCounter": 2,
@@ -15,8 +15,10 @@ LocalStorage-ключ: `glitterSort.v1`. Единый JSON:
   "stats": { "totalMoves": 123, "undoUsed": 4, "bonusUsed": 1 },
   "savedRun": {...},
   "sessionCount": 7,
-  "rateUsShownAtL3": true,
-  "rateUsCompleted": false
+  "rateUsCompleted": false,
+  "pushEnabled": true,
+  "pushPermissionAsked": true,
+  "userId": "0f8c…-uuid-v4"
 }
 ```
 
@@ -39,6 +41,15 @@ LocalStorage-ключ: `glitterSort.v1`. Единый JSON:
 ## ⚠️ Правила
 
 - **Не меняй уже опубликованную миграцию.** У живых юзеров уже сейвы на этой схеме.
+## Что делали миграции
+
+| N | Изменение |
+|---|---|
+| 1 | Переход на `schemaVersion`; удаление legacy-поля `version` |
+| 2 | Поля локальных push: `pushEnabled`, `pushPermissionAsked` |
+| 3 | `userId` (UUID v4) для AppMetrica |
+| 4 | Удалён `rateUsShownAtL3` — Rate-us переехал на политику по номерам уровней (L5, L8, L11, …), одноразовый L3-триггер убран |
+
 - **Миграции — defensive**: используй `?? defaultValue` для отсутствующих полей.
 - **Каскадные** — каждая запускается ровно один раз для каждого юзера.
 

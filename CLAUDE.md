@@ -61,7 +61,7 @@
 
 ## In-App оценка: RuStore Review SDK
 
-Кнопка «Оценить» в модалке `#rateus-modal` (показывается перед началом 2-го уровня сессии и после прохождения L3) вызывает **нативный диалог RuStore Review** поверх WebView. Подключено через bridge `window.RuStoreReview.launch()` / `__rustoreReviewCallback`, реализованный в html2apk при флаге `-RuStoreReviewSdk`. JS-обёртка — inline IIFE `window.RuStoreReviewClient` в `index.html` (раздел `[RUSTORE_REVIEW]`, ~после `window.Ads`). Точка вызова — `onRate` в `showRateUsThen`. Полная архитектура — в skill [`connect-rustore-review`](~/.claude/skills/connect-rustore-review/SKILL.md).
+Кнопка «Оценить» в модалке `#rateus-modal` (показывается после прохождения L5, L8, L11, L14 … — каждый третий уровень начиная с пятого, не чаще раза за запуск приложения и никогда после того, как игрок уже нажал «Оценить») вызывает **нативный диалог RuStore Review** поверх WebView. Подключено через bridge `window.RuStoreReview.launch()` / `__rustoreReviewCallback`, реализованный в html2apk при флаге `-RuStoreReviewSdk`. JS-обёртка — inline IIFE `window.RuStoreReviewClient` в `index.html` (раздел `[RUSTORE_REVIEW]`, ~после `window.Ads`). Точка вызова — `onRate` в `showRateUsThen`. Полная архитектура — в skill [`connect-rustore-review`](~/.claude/skills/connect-rustore-review/SKILL.md).
 
 **Fallback policy:**
 - Bridge нет (browser dev / APK без `-RuStoreReviewSdk`) → `window.open('https://www.rustore.ru/catalog/app/com.terekh.glittersort')`.
