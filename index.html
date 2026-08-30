@@ -438,6 +438,42 @@ body{
 .btn-link:hover{color:rgba(255,255,255,.8)}
 .btn-link:active{transform:translateY(1px)}
 
+/* ===== ЭНЕРГИЯ (молнии) =====
+   Счётчик в левом-верхнем углу. z-index 60 — ВЫШЕ модалок (.modal-wrap = 50),
+   чтобы запас было видно и на главном экране, и поверх окон «Уровень пройден»
+   и «Недостаточно молний». */
+.energy-hud{
+  position:fixed;
+  left:max(12px, env(safe-area-inset-left));
+  top:max(12px, env(safe-area-inset-top));
+  z-index:60;
+  display:flex;align-items:center;gap:7px;
+  padding:7px 14px 7px 10px;
+  border:1px solid var(--panel-border);
+  border-radius:999px;
+  background:rgba(10,4,30,.62);
+  backdrop-filter:blur(4px);
+  -webkit-backdrop-filter:blur(4px);
+  color:var(--text);
+  font-family:inherit;font-size:18px;font-weight:700;line-height:1;
+  letter-spacing:.5px;
+  -webkit-tap-highlight-color:transparent;
+}
+.energy-hud .ico-bolt{width:22px;height:22px}
+/* Пустой запас — подсвечиваем и делаем кликабельным (тап открывает пополнение). */
+.energy-hud.is-empty{border-color:rgba(255,91,115,.65);cursor:pointer}
+.energy-hud.is-empty #energy-count{color:var(--danger)}
+@keyframes energyPulse{0%{transform:scale(1)}35%{transform:scale(1.2)}100%{transform:scale(1)}}
+.energy-hud.pulse{animation:energyPulse .34s ease-out}
+
+/* Иконки внутри кнопок (молния в «Далее 1», значок рекламы в «Получить +5»). */
+.ico-bolt,.ico-ad{display:inline-block;flex:0 0 auto}
+.ico-bolt svg,.ico-ad svg{width:100%;height:100%;display:block}
+.modal .btn.btn-icons{display:inline-flex;align-items:center;justify-content:center;gap:9px}
+.modal .btn .ico-bolt{width:21px;height:21px}
+.modal .btn .ico-ad{width:23px;height:23px}
+.noenergy-modal p{margin-bottom:18px}
+
 /* ===== INFO BUTTON ("i" — Политика конфиденциальности) =====
    Маленькая плавающая кнопка в правом-нижнем углу. По нажатию открывает
    #info-modal с кнопкой-ссылкой на политику (открывается в системном
@@ -585,6 +621,25 @@ body{
 </style>
 </head>
 <body>
+<!-- Общие иконки (молния, значок рекламы). Держим одним <symbol>, чтобы не
+     дублировать пути в трёх местах: счётчик, «Далее 1⚡», «Получить +5⚡». -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="sym-bolt" viewBox="0 0 24 24">
+    <path d="M13.5 1.5 3.8 13.4c-.5.6-.1 1.5.7 1.5H9l-1.4 7.2c-.2.9 1 1.4 1.5.7l9.9-12c.5-.6.1-1.5-.7-1.5H14l1.4-7.1c.2-.9-1-1.4-1.5-.7z"
+          fill="#ffd23f" stroke="#c98f00" stroke-width="1" stroke-linejoin="round"/>
+  </symbol>
+  <symbol id="sym-ad" viewBox="0 0 24 24">
+    <rect x="2.5" y="4.5" width="19" height="15" rx="3.5" fill="none" stroke="currentColor" stroke-width="2"/>
+    <path d="M10 9.2v5.6l4.6-2.8z" fill="currentColor"/>
+  </symbol>
+</svg>
+
+<!-- Счётчик энергии. Виден всегда, в том числе поверх модалок. -->
+<div class="energy-hud" id="energy-hud" role="status" aria-label="Запас молний">
+  <span class="ico-bolt" aria-hidden="true"><svg><use href="#sym-bolt"/></svg></span>
+  <span id="energy-count">0</span>
+</div>
+
 <div id="app">
   <div class="level-title">
     <div class="lt-name" id="hud-level-tap">Уровень <b id="hud-level">1</b></div>
@@ -632,7 +687,28 @@ body{
   <div class="modal">
     <h2>Уровень пройден!</h2>
     <p id="win-text">Молодец! Готов к следующему?</p>
-    <button class="btn btn-primary" id="btn-next">Дальше →</button>
+    <!-- Запуск следующего уровня стоит одну молнию — цена прямо на кнопке. -->
+    <button class="btn btn-primary btn-icons" id="btn-next">
+      <span>Далее 1</span>
+      <span class="ico-bolt" aria-hidden="true"><svg><use href="#sym-bolt"/></svg></span>
+    </button>
+  </div>
+</div>
+
+<!-- Попап пополнения энергии. Открывается при тапе «Далее 1⚡» с пустым
+     запасом (окно победы остаётся под ним — после видео игрок возвращается
+     к нему и жмёт «Далее» ещё раз), а также при старте приложения, если
+     молний не хватает на новый уровень. -->
+<div class="modal-wrap" id="noenergy-modal">
+  <div class="modal noenergy-modal">
+    <h2>Недостаточно молний</h2>
+    <p>Чтобы восстановить запас энергию посмотрите короткое видео!</p>
+    <button class="btn btn-primary btn-icons" id="btn-get-energy">
+      <span class="ico-ad" aria-hidden="true"><svg><use href="#sym-ad"/></svg></span>
+      <span>Получить +5</span>
+      <span class="ico-bolt" aria-hidden="true"><svg><use href="#sym-bolt"/></svg></span>
+    </button>
+    <button class="btn-link" id="btn-noenergy-later">Позже</button>
   </div>
 </div>
 
@@ -1570,6 +1646,16 @@ window.Migrations = (() => {
       if ('rateUsShownAtL3' in state) delete state.rateUsShownAtL3;
       return state;
     },
+    5: (state) => {
+      // v4 → v5: энергия («молнии»). Запуск нового уровня стоит 1 молнию,
+      // стартовый запас 10. Тем, кто уже играет, выдаём тот же стартовый
+      // запас — иначе после обновления они упрутся в попап пополнения на
+      // первом же переходе.
+      if (typeof state.energy !== 'number' || !Number.isFinite(state.energy)) {
+        state.energy = 10;
+      }
+      return state;
+    },
   };
 
   function getCurrentSchemaVersion() {
@@ -1622,6 +1708,9 @@ window.Persist = (() => {
     // rateUsCompleted — игрок нажал «Оценить»; после этого окно не
     // показывается никогда. См. migration[4] про удалённый rateUsShownAtL3.
     rateUsCompleted: false,
+    // Энергия: запуск нового уровня стоит 1 молнию, стартовый запас 10,
+    // рекламный ролик даёт +5. См. migration[5] и ENERGY_* в [APP].
+    energy: 10,
     // Push-уведомления. См. migration[2] и [PUSH_SCHEDULER] блок.
     pushEnabled: true,
     pushPermissionAsked: false,
@@ -2563,6 +2652,7 @@ window.Render = (() => {
   function renderAll() {
     const s = State.get();
     if (!s) return;
+    renderEnergy();
     const showAdd = !s.bonusUsedThisLevel && s.sticks.length < 13;
     const totalCount = s.sticks.length + (showAdd ? 1 : 0);
     $sticks.dataset.count = String(totalCount);
@@ -3008,6 +3098,30 @@ window.Render = (() => {
   function showRateUs() { $rateUsModal.classList.add('open'); }
   function hideRateUs() { $rateUsModal.classList.remove('open'); }
 
+  // ===== Энергия =====
+  const $energyHud   = document.getElementById('energy-hud');
+  const $energyCount = document.getElementById('energy-count');
+  const $noEnergyModal = document.getElementById('noenergy-modal');
+  /**
+   * Перерисовывает счётчик молний. Значение берём из сейва — он источник
+   * правды (энергия переживает перезапуск). opts.pulse — короткая анимация
+   * при списании/пополнении, чтобы изменение не проходило незаметно.
+   */
+  function renderEnergy(opts) {
+    if (!$energyCount) return;
+    const n = Math.max(0, (Persist.load().energy | 0));
+    $energyCount.textContent = String(n);
+    $energyHud.classList.toggle('is-empty', n <= 0);
+    $energyHud.setAttribute('aria-label', `Молний: ${n}`);
+    if (opts && opts.pulse) {
+      $energyHud.classList.remove('pulse');
+      void $energyHud.offsetWidth;          // рестарт CSS-анимации
+      $energyHud.classList.add('pulse');
+    }
+  }
+  function showNoEnergy() { $noEnergyModal.classList.add('open'); }
+  function hideNoEnergy() { $noEnergyModal.classList.remove('open'); }
+
   let toastTimer = null;
   function toast(msg, ms = 1500) {
     $toast.textContent = msg;
@@ -3017,7 +3131,8 @@ window.Render = (() => {
   }
 
   return { renderAll, renderHud, renderActionButtons, showWin, hideWin, toast,
-           animatePour, getDifficulty, getDifficultyByRating, showRateUs, hideRateUs, isBusyBottle };
+           animatePour, getDifficulty, getDifficultyByRating, showRateUs, hideRateUs,
+           renderEnergy, showNoEnergy, hideNoEnergy, isBusyBottle };
 })();
 
 /* HTML2APK:DEV_ONLY */
@@ -3233,7 +3348,7 @@ window.DevPanel = (() => {
   // --- Level switching ---
   function switchLevel(n) {
     if (!Number.isFinite(n) || n < 1) return;
-    App.loadLevel(n);
+    App.loadLevel(n, { free: true });   // дев-панель энергию не тратит
     loadIntoUI(n);
   }
 
@@ -3373,7 +3488,7 @@ window.DevPanel = (() => {
         stack.map(c => (map[c] !== undefined ? map[c] : c)));
     }
     Levels.setRuntimeOverride(editingLevel, cfg);
-    App.loadLevel(editingLevel);
+    App.loadLevel(editingLevel, { free: true });
     renderJson();
   }
   function pushCurrentToRuntime() { applyColoursAndPush(); }
@@ -3479,13 +3594,13 @@ window.DevPanel = (() => {
 
   function resetCurrentLevel() {
     Levels.clearRuntimeOverride(editingLevel);
-    App.loadLevel(editingLevel);
+    App.loadLevel(editingLevel, { free: true });
     loadIntoUI(editingLevel);
     Render.toast(`Reset L${editingLevel}`);
   }
   function clearAllRuntime() {
     Levels.clearAllRuntimeOverrides();
-    App.loadLevel(editingLevel);
+    App.loadLevel(editingLevel, { free: true });
     loadIntoUI(editingLevel);
     Render.toast('Runtime-правки сброшены');
   }
@@ -3875,6 +3990,10 @@ window.App = (() => {
     // отличить «первую сессию» (sessionCount=1) от последующих (>=2).
     persisted.sessionCount = (persisted.sessionCount || 0) + 1;
     Persist.save(persisted);
+    // Счётчик молний рисуем сразу: если запаса не хватит даже на первый
+    // уровень, игрок увидит попап пополнения поверх пустого поля — и рядом
+    // должен видеть свой (нулевой) запас.
+    Render.renderEnergy();
     sessionCompletedCount = 0;
     rateUsShownThisSession = false;
     await Ads.init().catch(() => {});
@@ -3956,14 +4075,25 @@ window.App = (() => {
     }
   }
 
-  function loadLevel(levelNum) {
+  function loadLevel(levelNum, opts) {
     // Сначала проверяем savedRun: если есть и он для этого же уровня —
     // восстанавливаем поле, историю ходов и метаданные без новой генерации.
+    // Молнию за это НЕ списываем: уровень уже оплачен при первом запуске.
     const savedRun = Persist.loadSavedRun();
     if (savedRun && savedRun.level === levelNum
         && Array.isArray(savedRun.currentBottles)
         && Array.isArray(savedRun.initialBottles)) {
       restoreFromSavedRun(savedRun);
+      return;
+    }
+
+    // Новый уровень — платим молнией. Единая точка списания: сюда приходят
+    // и старт приложения, и переход после победы, и recovery после рекламы.
+    // opts.free — только для дев-панели (перегенерация уровня не должна
+    // жечь энергию во время отладки).
+    if (!(opts && opts.free) && !spendEnergy()) {
+      pendingLevelStart = () => loadLevel(levelNum, opts);
+      showNoEnergy(pendingLevelStart);
       return;
     }
 
@@ -4129,6 +4259,14 @@ window.App = (() => {
     });
     // HTML2APK:DEV_ONLY_END
 
+    // Тап по счётчику с пустым запасом — запасной вход в попап пополнения.
+    // Нужен, если игрок закрыл попап кнопкой «Позже» и остался без уровня
+    // (например, на старте приложения): иначе продолжить было бы нечем.
+    const $energyHud = document.getElementById('energy-hud');
+    if ($energyHud) $energyHud.addEventListener('click', () => {
+      if (!hasEnergy()) showNoEnergy(pendingLevelStart);
+    });
+
     // Info-кнопка и её модалка. URL политики совпадает с тем, что
     // указано в STORE_LISTING.md (поле privacyUrl) и в самой политике —
     // это требование магазинов: ссылка должна быть доступна изнутри
@@ -4238,6 +4376,82 @@ window.App = (() => {
     Render.showWin(`Молодец! Готов к уровню ${persisted.level}?`);
   }
 
+  // ===== Энергия (молнии) =====
+  // Запуск НОВОГО уровня стоит одну молнию (стартовый уровень тоже).
+  // Восстановление незаконченного уровня из сейва бесплатно — иначе каждый
+  // перезапуск приложения списывал бы молнию за уже оплаченный уровень.
+  // Пустой запас → попап «Недостаточно молний» с ролик-наградой на +5.
+  const ENERGY_PER_LEVEL = 1;
+  const ENERGY_REWARD    = 5;
+  // Отложенный старт уровня: ставится, когда loadLevel не смог списать
+  // молнию. Нужен, чтобы после просмотра ролика (или тапа по счётчику)
+  // уровень всё-таки запустился.
+  let pendingLevelStart = null;
+
+  function getEnergy() { return Math.max(0, Persist.load().energy | 0); }
+  function hasEnergy() { return getEnergy() >= ENERGY_PER_LEVEL; }
+  function spendEnergy() {
+    const p = Persist.load();
+    const cur = Math.max(0, p.energy | 0);
+    if (cur < ENERGY_PER_LEVEL) return false;
+    p.energy = cur - ENERGY_PER_LEVEL;
+    Persist.save(p);
+    Render.renderEnergy({ pulse: true });
+    return true;
+  }
+  function addEnergy(n) {
+    const p = Persist.load();
+    p.energy = Math.max(0, p.energy | 0) + n;
+    Persist.save(p);
+    Render.renderEnergy({ pulse: true });
+  }
+
+  /**
+   * Попап «Недостаточно молний». Окно победы (если оно открыто) НЕ закрываем:
+   * по ТЗ после просмотра ролика игрок возвращается именно к нему и жмёт
+   * «Далее 1⚡» ещё раз.
+   *   onRefilled — что сделать после успешного пополнения. Задаётся только
+   *   когда возвращаться некуда (старт приложения с пустым запасом): тогда
+   *   уровень запускается сам.
+   */
+  function showNoEnergy(onRefilled) {
+    const btnGet   = document.getElementById('btn-get-energy');
+    const btnLater = document.getElementById('btn-noenergy-later');
+    const detach = () => {
+      btnGet.removeEventListener('click', onGet);
+      btnLater.removeEventListener('click', onLater);
+    };
+    function onGet() {
+      btnGet.disabled = true;
+      Render.toast('Реклама...', 1500);
+      Ads.showRewarded().then(res => {
+        btnGet.disabled = false;
+        const watched = !!(res && res.rewarded);
+        Analytics.adShown({
+          type: 'rewarded',
+          placement: 'energy_refill',
+          watched: watched,
+          rewardGiven: watched
+        });
+        // Не досмотрел — попап оставляем открытым, можно попробовать снова.
+        if (!watched) { Render.toast('Реклама не была досмотрена'); return; }
+        detach();
+        addEnergy(ENERGY_REWARD);
+        Analytics.event('energy_refill', { amount: ENERGY_REWARD });
+        Render.hideNoEnergy();
+        Render.toast(`+${ENERGY_REWARD} молний`);
+        const resume = onRefilled || pendingLevelStart;
+        pendingLevelStart = null;
+        if (resume) resume();
+      });
+    }
+    function onLater() { detach(); Render.hideNoEnergy(); }
+    btnGet.disabled = false;
+    btnGet.addEventListener('click', onGet);
+    btnLater.addEventListener('click', onLater);
+    Render.showNoEnergy();
+  }
+
   // ===== Rate-us политика =====
   // Показываем окно после прохождения уровней 5, 8, 11, 14, … — первый раз
   // после L5, дальше каждый третий уровень. Номер сессии роли не играет:
@@ -4305,6 +4519,10 @@ window.App = (() => {
   }
 
   function onNext() {
+    // Запуск следующего уровня стоит молнию. Если запас пуст — показываем
+    // попап пополнения ПОВЕРХ окна победы и ничего больше не начинаем
+    // (ни rate-us, ни рекламу): игрок смотрит ролик и жмёт «Далее» снова.
+    if (!hasEnergy()) { showNoEnergy(null); return; }
     winLocked = false; // модал победы закрывается, можно снова трогать поле
     // Между уровнями дев-панель закрываем — она для редактирования
     // конкретного уровня и не должна болтаться через переход.

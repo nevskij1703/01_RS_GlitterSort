@@ -30,6 +30,7 @@
 | Event name | Params | File:line | Когда срабатывает |
 |---|---|---|---|
 | `revive_used` | `{ level_num }` | [index.html](../index.html) `onBonus()` (после успешного rewarded) | Юзер посмотрел rewarded и получил +1 пустую колбу. |
+| `energy_refill` | `{ amount }` | Игрок посмотрел rewarded и пополнил запас молний (+5) |
 
 **Замечания:**
 - В этой игре **нет** `level_fail` — нет механики проигрыша (только undo + retry).
