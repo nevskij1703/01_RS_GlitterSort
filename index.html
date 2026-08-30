@@ -470,6 +470,9 @@ body{
 .ico-bolt,.ico-ad{display:inline-block;flex:0 0 auto}
 .ico-bolt svg,.ico-ad svg{width:100%;height:100%;display:block}
 .modal .btn.btn-icons{display:inline-flex;align-items:center;justify-content:center;gap:9px}
+/* «Далее␣␣1⚡»: молния должна вплотную примыкать к цифре, поэтому зазор
+   убираем, а два пробела задаёт сама надпись (&nbsp;&nbsp;). */
+.modal .btn.btn-icons#btn-next{gap:0}
 .modal .btn .ico-bolt{width:21px;height:21px}
 .modal .btn .ico-ad{width:23px;height:23px}
 .noenergy-modal p{margin-bottom:18px}
@@ -687,9 +690,12 @@ body{
   <div class="modal">
     <h2>Уровень пройден!</h2>
     <p id="win-text">Молодец! Готов к следующему?</p>
-    <!-- Запуск следующего уровня стоит одну молнию — цена прямо на кнопке. -->
+    <!-- Запуск следующего уровня стоит одну молнию — цена прямо на кнопке.
+         Пробелы неразрывные: обычные схлопнулись бы в один, а нам нужно
+         ровно два между «Далее» и «1». Между «1» и молнией зазора нет —
+         за это отвечает gap:0 в правиле #btn-next. -->
     <button class="btn btn-primary btn-icons" id="btn-next">
-      <span>Далее 1</span>
+      <span>Далее&nbsp;&nbsp;1</span>
       <span class="ico-bolt" aria-hidden="true"><svg><use href="#sym-bolt"/></svg></span>
     </button>
   </div>
@@ -702,7 +708,7 @@ body{
 <div class="modal-wrap" id="noenergy-modal">
   <div class="modal noenergy-modal">
     <h2>Недостаточно молний</h2>
-    <p>Чтобы восстановить запас энергию посмотрите короткое видео!</p>
+    <p>Чтобы восстановить запас энергии, посмотрите короткое видео!</p>
     <button class="btn btn-primary btn-icons" id="btn-get-energy">
       <span class="ico-ad" aria-hidden="true"><svg><use href="#sym-ad"/></svg></span>
       <span>Получить +5</span>
