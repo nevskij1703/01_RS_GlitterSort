@@ -6,7 +6,7 @@ LocalStorage-ключ: `glitterSort.v1`. Единый JSON:
 
 ```json
 {
-  "schemaVersion": 5,
+  "schemaVersion": 6,
   "level": 5,
   "totalCompleted": 4,
   "interstitialCounter": 2,
@@ -19,7 +19,8 @@ LocalStorage-ключ: `glitterSort.v1`. Единый JSON:
   "pushEnabled": true,
   "pushPermissionAsked": true,
   "userId": "0f8c…-uuid-v4",
-  "energy": 7
+  "energy": 7,
+  "energyRegenAt": 1756500000000
 }
 ```
 
@@ -51,6 +52,7 @@ LocalStorage-ключ: `glitterSort.v1`. Единый JSON:
 | 3 | `userId` (UUID v4) для AppMetrica |
 | 4 | Удалён `rateUsShownAtL3` — Rate-us переехал на политику по номерам уровней (L5, L8, L11, …), одноразовый L3-триггер убран |
 | 5 | `energy` — энергия («молнии»), стартовый запас 10; запуск нового уровня стоит 1 |
+| 6 | `energyRegenAt` — якорь пассивного восстановления энергии (+1/час до 3) |
 
 - **Миграции — defensive**: используй `?? defaultValue` для отсутствующих полей.
 - **Каскадные** — каждая запускается ровно один раз для каждого юзера.

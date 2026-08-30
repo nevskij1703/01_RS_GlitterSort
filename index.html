@@ -443,11 +443,15 @@ body{
    чтобы запас было видно и на главном экране, и поверх окон «Уровень пройден»
    и «Недостаточно молний». */
 .energy-hud{
+  /* По умолчанию счётчик скрыт: на экране уровня он не нужен и мешает.
+     Показываем только когда открыт попап перехода на следующий уровень
+     или попап пополнения — класс .is-shown вешает Render. */
+  display:none;
   position:fixed;
   left:max(12px, env(safe-area-inset-left));
   top:max(12px, env(safe-area-inset-top));
   z-index:60;
-  display:flex;align-items:center;gap:7px;
+  align-items:center;gap:7px;
   padding:7px 14px 7px 10px;
   border:1px solid var(--panel-border);
   border-radius:999px;
@@ -459,6 +463,7 @@ body{
   letter-spacing:.5px;
   -webkit-tap-highlight-color:transparent;
 }
+.energy-hud.is-shown{display:flex}
 .energy-hud .ico-bolt{width:22px;height:22px}
 /* Пустой запас — подсвечиваем и делаем кликабельным (тап открывает пополнение). */
 .energy-hud.is-empty{border-color:rgba(255,91,115,.65);cursor:pointer}
@@ -646,7 +651,7 @@ body{
 <div id="app">
   <div class="level-title">
     <div class="lt-name" id="hud-level-tap">Уровень <b id="hud-level">1</b></div>
-    <div class="lt-diff" id="hud-diff">Очень просто</div>
+    <div class="lt-diff" id="hud-diff">Очень простой</div>
   </div>
 
   <div class="field">
@@ -1662,6 +1667,15 @@ window.Migrations = (() => {
       }
       return state;
     },
+    6: (state) => {
+      // v5 → v6: якорь пассивного восстановления энергии. Ставим «сейчас»,
+      // чтобы после обновления никому не начислилось за всё время, что он
+      // не играл.
+      if (typeof state.energyRegenAt !== 'number' || !Number.isFinite(state.energyRegenAt)) {
+        state.energyRegenAt = Date.now();
+      }
+      return state;
+    },
   };
 
   function getCurrentSchemaVersion() {
@@ -1717,6 +1731,10 @@ window.Persist = (() => {
     // Энергия: запуск нового уровня стоит 1 молнию, стартовый запас 10,
     // рекламный ролик даёт +5. См. migration[5] и ENERGY_* в [APP].
     energy: 10,
+    // Якорь пассивного восстановления (+1 молния в час, но только пока
+    // запас ниже ENERGY_REGEN_CAP). 0 = «ещё не считали», applyEnergyRegen
+    // проставит при первом запуске. См. migration[6].
+    energyRegenAt: 0,
     // Push-уведомления. См. migration[2] и [PUSH_SCHEDULER] блок.
     pushEnabled: true,
     pushPermissionAsked: false,
@@ -2593,13 +2611,13 @@ window.Render = (() => {
   // fallback — «Сложно» (предпоследний tier): обычно это значит
   // что поиск глубокий, но мы не пугаем «Очень сложно».
   const DIFF_TIERS = [
-    { maxSteps:  8,       name:'Очень просто',  color:'#7be37b' },
-    { maxSteps: 16,       name:'Просто',        color:'#c5e35b' },
-    { maxSteps: 24,       name:'Средне',        color:'#ffd23f' },
-    { maxSteps: 32,       name:'Сложно',        color:'#ff8a2b' },
-    { maxSteps: Infinity, name:'Очень сложно',  color:'#ef3a5d' },
+    { maxSteps:  8,       name:'Очень простой', color:'#7be37b' },
+    { maxSteps: 16,       name:'Простой',       color:'#c5e35b' },
+    { maxSteps: 24,       name:'Средний',       color:'#ffd23f' },
+    { maxSteps: 32,       name:'Сложный',       color:'#ff8a2b' },
+    { maxSteps: Infinity, name:'Очень сложный', color:'#ef3a5d' },
   ];
-  const DIFF_REQUIRES_BONUS = { name:'Очень сложно', color:'#ef3a5d' };
+  const DIFF_REQUIRES_BONUS = { name:'Очень сложный', color:'#ef3a5d' };
   function getDifficulty(optimalSteps, requireBonus) {
     if (requireBonus) return DIFF_REQUIRES_BONUS;
     if (optimalSteps == null) return DIFF_TIERS[DIFF_TIERS.length - 2]; // fallback: «Сложно»
@@ -2611,18 +2629,19 @@ window.Render = (() => {
   // старые пороги DIFF_TIERS по числу ходов тут не годятся: они бы
   // назвали самый сложный уровень игры «Средне».
   // Пары рейтингов на ступень: 1-2 / 3-4 / 5-6 / 7-8 / 9-10.
+  // Лейбл — прилагательное («уровень какой?»), а не наречие.
   const DIFF_BY_RATING = [
-    null,                                              // индекс 0 не используется
-    { name:'Очень просто', color:'#7be37b' },          // 1
-    { name:'Очень просто', color:'#7be37b' },          // 2
-    { name:'Просто',       color:'#c5e35b' },          // 3
-    { name:'Просто',       color:'#c5e35b' },          // 4
-    { name:'Средне',       color:'#ffd23f' },          // 5
-    { name:'Средне',       color:'#ffd23f' },          // 6
-    { name:'Сложно',       color:'#ff8a2b' },          // 7
-    { name:'Сложно',       color:'#ff8a2b' },          // 8
-    { name:'Очень сложно', color:'#ef3a5d' },          // 9
-    { name:'Очень сложно', color:'#ef3a5d' },          // 10
+    null,                                               // индекс 0 не используется
+    { name:'Очень простой', color:'#7be37b' },          // 1
+    { name:'Очень простой', color:'#7be37b' },          // 2
+    { name:'Простой',       color:'#c5e35b' },          // 3
+    { name:'Простой',       color:'#c5e35b' },          // 4
+    { name:'Средний',       color:'#ffd23f' },          // 5
+    { name:'Средний',       color:'#ffd23f' },          // 6
+    { name:'Сложный',       color:'#ff8a2b' },          // 7
+    { name:'Сложный',       color:'#ff8a2b' },          // 8
+    { name:'Очень сложный', color:'#ef3a5d' },          // 9
+    { name:'Очень сложный', color:'#ef3a5d' },          // 10
   ];
   function getDifficultyByRating(rating) {
     const r = Math.max(1, Math.min(10, rating | 0));
@@ -3096,8 +3115,9 @@ window.Render = (() => {
   function showWin(text) {
     if (text) $winText.textContent = text;
     $winModal.classList.add('open');
+    syncEnergyHud();
   }
-  function hideWin() { $winModal.classList.remove('open'); }
+  function hideWin() { $winModal.classList.remove('open'); syncEnergyHud(); }
 
   // ===== Rate-us модалка =====
   const $rateUsModal = document.getElementById('rateus-modal');
@@ -3119,14 +3139,28 @@ window.Render = (() => {
     $energyCount.textContent = String(n);
     $energyHud.classList.toggle('is-empty', n <= 0);
     $energyHud.setAttribute('aria-label', `Молний: ${n}`);
+    syncEnergyHud();
     if (opts && opts.pulse) {
       $energyHud.classList.remove('pulse');
       void $energyHud.offsetWidth;          // рестарт CSS-анимации
       $energyHud.classList.add('pulse');
     }
   }
-  function showNoEnergy() { $noEnergyModal.classList.add('open'); }
-  function hideNoEnergy() { $noEnergyModal.classList.remove('open'); }
+  /**
+   * Счётчик молний показываем ТОЛЬКО поверх попапов «Уровень пройден» и
+   * «Недостаточно молний» — там он объясняет цену кнопки «Далее 1⚡».
+   * На экране уровня он не нужен: игрок в этот момент решает головоломку,
+   * а не считает энергию.
+   */
+  function syncEnergyHud() {
+    if (!$energyHud) return;
+    const show = $winModal.classList.contains('open')
+              || $noEnergyModal.classList.contains('open');
+    $energyHud.classList.toggle('is-shown', show);
+  }
+  function showNoEnergy() { $noEnergyModal.classList.add('open'); syncEnergyHud(); }
+  function hideNoEnergy() { $noEnergyModal.classList.remove('open'); syncEnergyHud(); }
+  function isNoEnergyOpen() { return $noEnergyModal.classList.contains('open'); }
 
   let toastTimer = null;
   function toast(msg, ms = 1500) {
@@ -3138,7 +3172,7 @@ window.Render = (() => {
 
   return { renderAll, renderHud, renderActionButtons, showWin, hideWin, toast,
            animatePour, getDifficulty, getDifficultyByRating, showRateUs, hideRateUs,
-           renderEnergy, showNoEnergy, hideNoEnergy, isBusyBottle };
+           renderEnergy, showNoEnergy, hideNoEnergy, isNoEnergyOpen, isBusyBottle };
 })();
 
 /* HTML2APK:DEV_ONLY */
@@ -3996,9 +4030,9 @@ window.App = (() => {
     // отличить «первую сессию» (sessionCount=1) от последующих (>=2).
     persisted.sessionCount = (persisted.sessionCount || 0) + 1;
     Persist.save(persisted);
-    // Счётчик молний рисуем сразу: если запаса не хватит даже на первый
-    // уровень, игрок увидит попап пополнения поверх пустого поля — и рядом
-    // должен видеть свой (нулевой) запас.
+    // Сначала начисляем то, что «накапало» пока игра была закрыта, и только
+    // потом решаем, хватает ли на уровень.
+    applyEnergyRegen();
     Render.renderEnergy();
     sessionCompletedCount = 0;
     rateUsShownThisSession = false;
@@ -4065,8 +4099,39 @@ window.App = (() => {
       return;
     }
     if (pendingAt) Persist.clearInterstitialPending(); // истёкший флаг — чистим
+
+    // Игрок закрыл приложение на переходе между уровнями — возвращаем его
+    // ровно туда: поле пройденного уровня и окно победы. Следующий уровень
+    // не начинаем и молнию не берём; попап «Недостаточно молний» тоже не
+    // показываем — если запаса нет, игрок увидит его сам, нажав «Далее».
+    const finishedRun = Persist.loadSavedRun();
+    if (finishedRun && finishedRun.completed
+        && Array.isArray(finishedRun.currentBottles)
+        && Array.isArray(finishedRun.initialBottles)) {
+      restoreFromSavedRun(finishedRun);
+      winLocked = true;                       // поле под модалом не трогаем
+      Render.showWin(`Молодец! Готов к уровню ${persisted.level}?`);
+      wireEvents();
+      startEnergyTicker();
+      return;
+    }
+
     loadLevel(persisted.level || 1);
     wireEvents();
+    startEnergyTicker();
+  }
+
+  /**
+   * Пересчёт пассивного восстановления: раз в минуту, пока приложение живое,
+   * и дополнительно при возврате из фона — на мобильных таймеры в свёрнутом
+   * приложении замораживаются, и без этого счётчик оживал бы только через
+   * минуту после возврата.
+   */
+  function startEnergyTicker() {
+    setInterval(tickEnergyRegen, ENERGY_TICK_MS);
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) tickEnergyRegen();
+    });
   }
 
   // Помечает текущий уровень как «дёрганый» — игрок использовал откат
@@ -4097,6 +4162,7 @@ window.App = (() => {
     // и старт приложения, и переход после победы, и recovery после рекламы.
     // opts.free — только для дев-панели (перегенерация уровня не должна
     // жечь энергию во время отладки).
+    if (!(opts && opts.free)) applyEnergyRegen();
     if (!(opts && opts.free) && !spendEnergy()) {
       pendingLevelStart = () => loadLevel(levelNum, opts);
       showNoEnergy(pendingLevelStart);
@@ -4356,9 +4422,18 @@ window.App = (() => {
     // Следующий уровень сохраним заранее, чтобы перезагрузка после победы
     // показывала уже новый.
     persisted.level = (s ? s.level : 1) + 1;
-    // Очищаем savedRun — этот уровень пройден; следующая loadLevel
-    // сгенерирует новый.
-    persisted.savedRun = null;
+    // savedRun НЕ обнуляем, а помечаем пройденным. Иначе игрок, закрывший
+    // приложение на окне перехода (или на «Недостаточно молний»), при
+    // следующем запуске видел бы пустую заготовку «Уровень 1» вместо своего
+    // прогресса. Теперь мы вернём его ровно сюда: поле пройденного уровня +
+    // окно победы. Метка стирается сама, когда сгенерируется новый уровень
+    // (loadLevel перезапишет savedRun).
+    if (persisted.savedRun && s && persisted.savedRun.level === s.level) {
+      persisted.savedRun.completed = true;
+      persisted.savedRun.currentBottles = s.sticks.map(b => [...b]);
+    } else {
+      persisted.savedRun = null;
+    }
     Persist.save(persisted);
     sessionCompletedCount++;
     // Прогреваем рекламу на фоне, пока игрок читает модал победы:
@@ -4389,6 +4464,13 @@ window.App = (() => {
   // Пустой запас → попап «Недостаточно молний» с ролик-наградой на +5.
   const ENERGY_PER_LEVEL = 1;
   const ENERGY_REWARD    = 5;
+  // Пассивное восстановление: +1 молния в час, но только пока запас НИЖЕ
+  // потолка. Ушёл с одной молнией — через два часа будет три, и дальше
+  // копиться не будет, пока снова не начнёт тратить. Ролик (+5) может
+  // поднять запас выше потолка — восстановление тогда просто стоит.
+  const ENERGY_REGEN_MS  = 60 * 60 * 1000;
+  const ENERGY_REGEN_CAP = 3;
+  const ENERGY_TICK_MS   = 60 * 1000;   // как часто пересчитываем при живом приложении
   // Отложенный старт уровня: ставится, когда loadLevel не смог списать
   // молнию. Нужен, чтобы после просмотра ролика (или тапа по счётчику)
   // уровень всё-таки запустился.
@@ -4401,6 +4483,11 @@ window.App = (() => {
     const cur = Math.max(0, p.energy | 0);
     if (cur < ENERGY_PER_LEVEL) return false;
     p.energy = cur - ENERGY_PER_LEVEL;
+    // Запас опустился ниже потолка — с этого момента идёт отсчёт часа до
+    // следующей бесплатной молнии.
+    if (cur >= ENERGY_REGEN_CAP && p.energy < ENERGY_REGEN_CAP) {
+      p.energyRegenAt = Date.now();
+    }
     Persist.save(p);
     Render.renderEnergy({ pulse: true });
     return true;
@@ -4408,8 +4495,68 @@ window.App = (() => {
   function addEnergy(n) {
     const p = Persist.load();
     p.energy = Math.max(0, p.energy | 0) + n;
+    // Запас снова на потолке или выше — таймер восстановления останавливаем,
+    // иначе позже начислилось бы «за простой на полном запасе».
+    if (p.energy >= ENERGY_REGEN_CAP) p.energyRegenAt = Date.now();
     Persist.save(p);
     Render.renderEnergy({ pulse: true });
+  }
+
+  /**
+   * Пассивное восстановление. Начисляет по одной молнии за каждый полный
+   * час, прошедший с якоря, но не выше ENERGY_REGEN_CAP.
+   *   - Пока запас на потолке или выше — таймер стоит (якорь = сейчас).
+   *   - Остаток минут не пропадает: якорь двигаем ровно на начисленные часы.
+   *   - Долгое отсутствие не даёт больше потолка: gain ограничен.
+   * Возвращает, сколько молний начислено (0, если ничего).
+   */
+  function applyEnergyRegen() {
+    const p = Persist.load();
+    const now = Date.now();
+    const energy = Math.max(0, p.energy | 0);
+
+    if (energy >= ENERGY_REGEN_CAP) {
+      // Держим якорь свежим, но не пишем сейв на каждый тик.
+      if (!Number.isFinite(p.energyRegenAt) || now - p.energyRegenAt > 30 * 1000) {
+        p.energyRegenAt = now;
+        Persist.save(p);
+      }
+      return 0;
+    }
+    if (!Number.isFinite(p.energyRegenAt) || p.energyRegenAt <= 0 || p.energyRegenAt > now) {
+      // Нет якоря (или он «из будущего» — часы устройства перевели назад):
+      // начинаем отсчёт заново, ничего не начисляя.
+      p.energyRegenAt = now;
+      Persist.save(p);
+      return 0;
+    }
+    const ticks = Math.floor((now - p.energyRegenAt) / ENERGY_REGEN_MS);
+    if (ticks <= 0) return 0;
+    const gain = Math.min(ticks, ENERGY_REGEN_CAP - energy);
+    p.energy = energy + gain;
+    p.energyRegenAt = (p.energy >= ENERGY_REGEN_CAP)
+      ? now                                        // добрали до потолка — стоп
+      : p.energyRegenAt + ticks * ENERGY_REGEN_MS; // остаток минут сохраняем
+    Persist.save(p);
+    Render.renderEnergy({ pulse: gain > 0 });
+    return gain;
+  }
+
+  /**
+   * Тик восстановления «с последствиями»: если молнии подъехали, пока игрок
+   * сидит на попапе «Недостаточно молний», закрываем попап и продолжаем то,
+   * что было отложено (иначе он смотрел бы на попап, уже имея энергию).
+   */
+  function tickEnergyRegen() {
+    const gained = applyEnergyRegen();
+    if (gained <= 0) return;
+    Render.toast(`+${gained} ⚡`);
+    if (Render.isNoEnergyOpen() && hasEnergy()) {
+      Render.hideNoEnergy();
+      const resume = pendingLevelStart;
+      pendingLevelStart = null;
+      if (resume) resume();
+    }
   }
 
   /**
@@ -4452,6 +4599,11 @@ window.App = (() => {
       });
     }
     function onLater() { detach(); Render.hideNoEnergy(); }
+    // «Позже» прячем, когда за попапом ничего нет (старт приложения с пустым
+    // запасом): закрыв его, игрок остался бы перед пустым экраном без
+    // единой кнопки. Когда попап открыт поверх окна победы — «Позже»
+    // возвращает к нему, и это нормальный выход.
+    btnLater.style.display = onRefilled ? 'none' : '';
     btnGet.disabled = false;
     btnGet.addEventListener('click', onGet);
     btnLater.addEventListener('click', onLater);
@@ -4528,6 +4680,7 @@ window.App = (() => {
     // Запуск следующего уровня стоит молнию. Если запас пуст — показываем
     // попап пополнения ПОВЕРХ окна победы и ничего больше не начинаем
     // (ни rate-us, ни рекламу): игрок смотрит ролик и жмёт «Далее» снова.
+    applyEnergyRegen();
     if (!hasEnergy()) { showNoEnergy(null); return; }
     winLocked = false; // модал победы закрывается, можно снова трогать поле
     // Между уровнями дев-панель закрываем — она для редактирования
