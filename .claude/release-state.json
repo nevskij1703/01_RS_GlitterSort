@@ -1,7 +1,7 @@
 {
   "_comment": "Состояние последнего опубликованного в РуСтор релиза. Обновляется ВРУЧНУЮ после реальной публикации. Используется skill `prepare-release-candidate`.",
-  "lastPublishedSchemaVersion": 1,
-  "lastPublishedVersionCode": 1259450,
-  "lastPublishedVersionName": "1.0.0.202605241450",
-  "lastPublishedAt": "2026-05-24T18:57:25Z"
+  "lastPublishedSchemaVersion": 6,
+  "lastPublishedVersionCode": 1400541,
+  "lastPublishedVersionName": "1.0.0.202608301421",
+  "lastPublishedAt": "2026-08-30T16:07:35Z"
 }
