@@ -6,7 +6,7 @@ LocalStorage-ключ: `glitterSort.v1`. Единый JSON:
 
 ```json
 {
-  "schemaVersion": 6,
+  "schemaVersion": 7,
   "level": 5,
   "totalCompleted": 4,
   "interstitialCounter": 2,
@@ -20,7 +20,9 @@ LocalStorage-ключ: `glitterSort.v1`. Единый JSON:
   "pushPermissionAsked": true,
   "userId": "0f8c…-uuid-v4",
   "energy": 7,
-  "energyRegenAt": 1756500000000
+  "energyRegenAt": 1756500000000,
+  "adFreeStreak": 1,
+  "rateUsLastShownAt": 1757000000000
 }
 ```
 
@@ -53,6 +55,7 @@ LocalStorage-ключ: `glitterSort.v1`. Единый JSON:
 | 4 | Удалён `rateUsShownAtL3` — Rate-us переехал на политику по номерам уровней (L5, L8, L11, …), одноразовый L3-триггер убран |
 | 5 | `energy` — энергия («молнии»), стартовый запас 10; запуск нового уровня стоит 1 |
 | 6 | `energyRegenAt` — якорь пассивного восстановления энергии (+1/час до 3) |
+| 7 | `adFreeStreak` + `rateUsLastShownAt` — возврат межстраничной рекламы (частота по уровням без роликов) и суточный кулдаун Rate-us; удалён мёртвый `interstitialCounter` |
 
 - **Миграции — defensive**: используй `?? defaultValue` для отсутствующих полей.
 - **Каскадные** — каждая запускается ровно один раз для каждого юзера.

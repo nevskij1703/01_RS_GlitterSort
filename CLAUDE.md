@@ -47,13 +47,19 @@
 3. Создаст `YandexAdsBridge.java` рядом с MainActivity.
 4. Перепишет `MainActivity.java` чтобы вызвать `MobileAds.initialize(...)` + `addJavascriptInterface(new YandexAdsBridge(...), "YandexAds")`.
 
-### ⛔ Межстраничная реклама временно выключена
+### Частота показов
 
-`INTERSTITIAL_ENABLED = false` в начале блока `[ADS]` (`index.html`). Причина: жалобы игроков в отзывах РуСтора при почти нулевом доходе от этого формата. Rewarded («+1 колба») работает как раньше. Подробности — [docs/ADS.md](docs/ADS.md) → «Межстраничная реклама выключена».
+**Межстраничная**: каждые 2 уровня, пройденных без единого ролика, но не раньше L3. Счётчик `adFreeStreak` в сейве; уровень с любым rewarded счётчик не двигает и показ после себя отменяет, показ интерстишла обнуляет счётчик. Плюс cooldown 2 мин и recovery 5 мин. Константы — `INTERSTITIAL_MIN_LEVEL` / `ADFREE_STREAK_FOR_INTERSTITIAL` в `[APP]`. Таблица и примеры — [docs/ADS.md](docs/ADS.md) → «Частота межстраничной рекламы».
+
+Формат был выключен с 26.08 по 09.09.2026 (жалобы в отзывах). Вернули именно с привязкой к «уровням без рекламы», чтобы активные смотрельщики rewarded межстраничную почти не видели.
+
+**Rate-us**: не раньше L4, только на уровнях, за которыми НЕ следует интерстишл (окно занимает тот же слот между уровнями), кулдаун сутки (`rateUsLastShownAt`) плюс один показ за запуск приложения.
 
 ### Правила (для будущих сессий)
 
-- **НЕ «чини»** отсутствие межстраничной рекламы — это осознанное решение. Единственный способ вернуть — поставить `INTERSTITIAL_ENABLED = true` по явной просьбе Александра. Политику показа в `[APP]` (уровень ≥ 5, cooldown, recovery) **не удаляй** — она ждёт возврата флага.
+- **НЕ считай частоту рекламы по номерам уровней.** Она считается по `adFreeStreak` — уровням без роликов. Пары «каждый 2-й уровень» в коде нет и быть не должно: игрок, смотрящий rewarded, обязан видеть меньше межстраничной.
+- **НЕ забудь `markAdSeen()`**, если добавляешь новое место показа рекламы. Без него уровень будет считаться «тихим», и игрок получит интерстишл сразу после ролика.
+- **НЕ используй битовые операции с timestamp'ами** (`x | 0` обрезает до 32 бит, а `Date.now()` — это ~1.75e12). На этом уже погорел кулдаун Rate-us.
 - **НЕ возвращай** demo-IDs `R-M-DEMO-1/2` — они были у Яндекса в их примерах и не работают в production.
 - **НЕ подключай** веб-SDK Yandex Games (`https://yandex.ru/games/sdk/...`) — в РуСтор APK он не используется.
 - **НЕ убирай** mock-fallback из `Ads.init` — он нужен для dev-режима в браузере.
@@ -61,7 +67,7 @@
 
 ## In-App оценка: RuStore Review SDK
 
-Кнопка «Оценить» в модалке `#rateus-modal` (показывается после прохождения L5, L8, L11, L14 … — каждый третий уровень начиная с пятого, не чаще раза за запуск приложения и никогда после того, как игрок уже нажал «Оценить») вызывает **нативный диалог RuStore Review** поверх WebView. Подключено через bridge `window.RuStoreReview.launch()` / `__rustoreReviewCallback`, реализованный в html2apk при флаге `-RuStoreReviewSdk`. JS-обёртка — inline IIFE `window.RuStoreReviewClient` в `index.html` (раздел `[RUSTORE_REVIEW]`, ~после `window.Ads`). Точка вызова — `onRate` в `showRateUsThen`. Полная архитектура — в skill [`connect-rustore-review`](~/.claude/skills/connect-rustore-review/SKILL.md).
+Кнопка «Оценить» в модалке `#rateus-modal` (показывается не раньше L4, только на уровнях без интерстишла, не чаще раза в сутки и раза за запуск приложения, и никогда после того, как игрок уже нажал «Оценить») вызывает **нативный диалог RuStore Review** поверх WebView. Подключено через bridge `window.RuStoreReview.launch()` / `__rustoreReviewCallback`, реализованный в html2apk при флаге `-RuStoreReviewSdk`. JS-обёртка — inline IIFE `window.RuStoreReviewClient` в `index.html` (раздел `[RUSTORE_REVIEW]`, ~после `window.Ads`). Точка вызова — `onRate` в `showRateUsThen`. Полная архитектура — в skill [`connect-rustore-review`](~/.claude/skills/connect-rustore-review/SKILL.md).
 
 **Fallback policy:**
 - Bridge нет (browser dev / APK без `-RuStoreReviewSdk`) → `window.open('https://www.rustore.ru/catalog/app/com.terekh.glittersort')`.

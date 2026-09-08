@@ -1492,6 +1492,10 @@ window.State = (() => {
       moves: 0,                 // счётчик совершённых ходов
       history: [],              // стек для undo
       bonusUsedThisLevel: false,
+      // Реклама на этом уровне: видел ли игрок ролик и учтён ли уровень
+      // в серии «без рекламы» (см. политику показов в [APP]).
+      adSeenThisLevel: false,
+      streakCounted: false,
     };
     return state;
   }
@@ -1676,6 +1680,26 @@ window.Migrations = (() => {
       }
       return state;
     },
+    7: (state) => {
+      // v6 → v7: вернули межстраничную рекламу с новой политикой.
+      //   adFreeStreak — счётчик уровней, пройденных без рекламы (от него
+      //     зависит частота интерстишла). Стартуем с 0: после обновления
+      //     первый показ будет не раньше, чем игрок пройдёт два уровня
+      //     без рекламы.
+      //   rateUsLastShownAt — метка последнего показа Rate-us (кулдаун
+      //     сутки). 0 = ещё не показывали, первый показ не блокируется.
+      //   interstitialCounter — мёртвое поле от самой первой политики
+      //     («каждые 2 уровня»); её код удалён давно. Чистим, чтобы в
+      //     сейве не лежало двух похожих счётчиков.
+      if (typeof state.adFreeStreak !== 'number' || !Number.isFinite(state.adFreeStreak)) {
+        state.adFreeStreak = 0;
+      }
+      if (typeof state.rateUsLastShownAt !== 'number' || !Number.isFinite(state.rateUsLastShownAt)) {
+        state.rateUsLastShownAt = 0;
+      }
+      if ('interstitialCounter' in state) delete state.interstitialCounter;
+      return state;
+    },
   };
 
   function getCurrentSchemaVersion() {
@@ -1712,7 +1736,6 @@ window.Persist = (() => {
     schemaVersion: window.Migrations.getCurrentSchemaVersion(),
     level: 1,
     totalCompleted: 0,
-    interstitialCounter: 0,
     customLevels: {},        // {n: {sticks, capacity, ...}}
     settings: { sound: true },
     stats: { totalMoves: 0, undoUsed: 0, bonusUsed: 0 },
@@ -1728,6 +1751,12 @@ window.Persist = (() => {
     // rateUsCompleted — игрок нажал «Оценить»; после этого окно не
     // показывается никогда. См. migration[4] про удалённый rateUsShownAtL3.
     rateUsCompleted: false,
+    // rateUsLastShownAt — когда окно показывали в последний раз. Кулдаун
+    // сутки: нажал «Может позже» — раньше чем через 24ч не спрашиваем.
+    rateUsLastShownAt: 0,
+    // adFreeStreak — сколько уровней подряд пройдено БЕЗ единого показа
+    // рекламы. На нём держится частота интерстишла (см. [APP]).
+    adFreeStreak: 0,
     // Энергия: запуск нового уровня стоит 1 молнию, стартовый запас 10,
     // рекламный ролик даёт +5. См. migration[5] и ENERGY_* в [APP].
     energy: 10,
@@ -1816,18 +1845,6 @@ window.Persist = (() => {
     try { localStorage.removeItem(KEY); } catch (e) {}
   }
 
-  // Interstitial cadence: показывать каждые 2 пройденных уровня
-  // (LEGACY: новой логикой не используется, оставлен для совместимости)
-  function bumpInterstitialCounter() {
-    const data = load();
-    data.interstitialCounter = (data.interstitialCounter || 0) + 1;
-    save(data);
-    return data.interstitialCounter;
-  }
-  function shouldShowInterstitial(counter) {
-    return counter > 0 && counter % 2 === 0;
-  }
-
   // Recovery flag для случая, когда мы открыли интерстишл, но игрок
   // закрыл приложение до того как реклама зарезолвилась. На следующем
   // запуске App.start читает этот timestamp и, если прошло меньше 5 минут,
@@ -1857,7 +1874,8 @@ window.Persist = (() => {
   //   history       — стек {src,dst,count,color} ходов от initial к current
   //   moves         — счётчик пройденных ходов
   //   bonusUsedThisLevel
-  //   interstitialFlagged — игрок дёргал уровень (для политики рекламы)
+  //   adSeenThisLevel — на уровне уже показывали рекламу (политика показов)
+  //   streakCounted   — уровень уже учтён в adFreeStreak (защита от двойного счёта)
   //   optimalSteps  — BFS-оптимум исходной раскладки (для HUD сложности)
   //   requireBonus  — флаг "решаемо только с +1 колбой"
   function saveSavedRun(run) {
@@ -1941,7 +1959,6 @@ window.Persist = (() => {
     KEY, DEFAULTS, load, save,
     loadCustomLevel, saveCustomLevel, clearCustomLevel, clearAll, clear,
     loadGenMeta, saveGenMeta, shiftGenMeta,
-    bumpInterstitialCounter, shouldShowInterstitial,
     markInterstitialPending, clearInterstitialPending, loadInterstitialPending,
     saveSavedRun, loadSavedRun, clearSavedRun, updateSavedRun,
     getUserId,
@@ -2045,14 +2062,15 @@ window.Ads = (() => {
   const UNIT_INTERSTITIAL = 'R-M-19273487-1';
   const UNIT_REWARDED     = 'R-M-19273487-2';
 
-  // ===== ВРЕМЕННЫЙ ВЫКЛЮЧАТЕЛЬ МЕЖСТРАНИЧНОЙ РЕКЛАМЫ =====
-  // false — интерстишл не показывается и не прогревается вообще.
-  // Причина: в отзывах игроки жалуются именно на межстраничную рекламу,
-  // а её доход почти нулевой на фоне rewarded («+1 колба»). Rewarded
-  // продолжает работать в полном объёме.
-  // Чтобы вернуть — просто поставь true: вся политика показа в [APP]
-  // цела (shouldShowInterstitialNow, cooldown, recovery, аналитика).
-  const INTERSTITIAL_ENABLED = false;
+  // ===== ВЫКЛЮЧАТЕЛЬ МЕЖСТРАНИЧНОЙ РЕКЛАМЫ =====
+  // Аварийный тумблер: погасить формат целиком, не разбирая политику.
+  // Частота показов задаётся не здесь, а политикой в [APP]
+  // (ADFREE_STREAK_FOR_INTERSTITIAL + INTERSTITIAL_MIN_LEVEL).
+  // История: с 26.08 по 09.09.2026 формат был выключен — игроки жаловались
+  // в отзывах РуСтора. Вернули с новой политикой: показ привязан к числу
+  // уровней, пройденных БЕЗ рекламы, поэтому те, кто смотрит rewarded,
+  // межстраничную почти не увидят.
+  const INTERSTITIAL_ENABLED = true;
 
   // Таймаут на ожидание callback'а от Java. Страховка от молчаливого
   // зависания SDK (нет fill / нет сети / unit на модерации). 120 сек —
@@ -2087,7 +2105,7 @@ window.Ads = (() => {
       };
       console.log('[Ads] backend=native (YandexAds bridge)');
       // Preload при старте, чтобы первый показ был мгновенным.
-      // Интерстишл не прогреваем пока INTERSTITIAL_ENABLED=false — незачем
+      // Интерстишл прогреваем только когда формат включён — иначе незачем
       // жечь запросы к SDK за рекламу, которую мы не покажем.
       try {
         if (INTERSTITIAL_ENABLED) window.YandexAds.preloadInterstitial(UNIT_INTERSTITIAL);
@@ -3968,29 +3986,72 @@ window.App = (() => {
   let rateUsShownThisSession = false;
 
   // ===== Интерстишл политика =====
-  // ⚠️ СЕЙЧАС МЕЖСТРАНИЧНАЯ ВЫКЛЮЧЕНА глобально: Ads.INTERSTITIAL_ENABLED
-  // === false (см. комментарий в [ADS]). Политика ниже сохранена целиком
-  // и оживёт сразу, как только флаг вернут в true.
-  // 1) Показываем только после прохождения 5+ уровня
-  // 2) Только если игрок «дёргал» уровень (undo / +колба за рекламу)
-  // 3) Cooldown 2 мин между показами; cooldown сбрасывается при перезапуске
-  //    приложения (хранится в памяти, не в localStorage)
-  // 4) Если предыдущий показ не успел зарезолвиться (закрыл приложение),
-  //    и прошло < 5 мин — показываем сразу на старте.
-  const INTERSTITIAL_MIN_COMPLETED_LEVEL = 5;   // показ только после прохождения L≥5
-  const INTERSTITIAL_COOLDOWN_MS         = 2 * 60 * 1000;  // 2 минуты
-  const INTERSTITIAL_RECOVERY_MS         = 5 * 60 * 1000;  // 5 минут на восстановление
-  const INTERSTITIAL_SHOW_TIMEOUT_MS     = 90 * 1000;      // safety: не зависать дольше 90с
+  // Считаем уровни, пройденные БЕЗ единого показа рекламы (adFreeStreak в
+  // сейве). Уровень «с рекламой» — любой, где игрок видел ролик: rewarded
+  // за +1 колбу, rewarded за молнии или сам интерстишл.
+  //
+  //   - уровень пройден без рекламы  → adFreeStreak++
+  //   - уровень пройден с рекламой   → счётчик НЕ меняется (и интерстишл
+  //     после такого уровня не показываем — игрок только что смотрел ролик)
+  //   - показали интерстишл          → счётчик = 0
+  //   - не раньше INTERSTITIAL_MIN_LEVEL: до третьего уровня не показываем
+  //     вообще, но счётчик уже идёт, поэтому первый показ приходится на L3
+  //
+  // Как это выглядит у игрока (без rewarded вовсе): L3, L5, L7, L9…
+  // Посмотрел ролик на L5 → после L5 тишина, интерстишл сдвигается на L6.
+  //
+  // Плюс два предохранителя, которых нет в ТЗ, но без них формат может
+  // выстрелить очередью:
+  //   - COOLDOWN 2 мин между показами (в памяти, на сессию). Если показ
+  //     подавлен кулдауном, счётчик НЕ сбрасывается — реклама просто
+  //     сдвигается на следующий уровень.
+  //   - RECOVERY: если предыдущий показ не зарезолвился (игрок закрыл
+  //     приложение внутри рекламы) и прошло < 5 мин — доигрываем на старте.
+  const INTERSTITIAL_MIN_LEVEL            = 3;   // не раньше L3
+  const ADFREE_STREAK_FOR_INTERSTITIAL    = 2;   // каждые 2 уровня без рекламы
+  const INTERSTITIAL_COOLDOWN_MS          = 2 * 60 * 1000;  // 2 минуты
+  const INTERSTITIAL_RECOVERY_MS          = 5 * 60 * 1000;  // 5 минут на восстановление
+  const INTERSTITIAL_SHOW_TIMEOUT_MS      = 90 * 1000;      // safety: не зависать дольше 90с
   // In-memory cooldown — на сессию игры. Сбрасывается при перезапуске.
   let lastInterstitialAtMs = 0;
 
-  function shouldShowInterstitialNow(justCompletedLevel, flagged) {
-    // Глобальный выключатель — межстраничная временно отключена.
+  /**
+   * Учитывает пройденный уровень в счётчике adFreeStreak. Зовётся РОВНО
+   * один раз на уровень: повторный вызов (игрок мог упереться в нехватку
+   * молний и нажать «Далее» второй раз) защищён флагом streakCounted.
+   * Возвращает актуальное значение счётчика.
+   */
+  function accountLevelForAds(s) {
+    const persisted = Persist.load();
+    let streak = Math.max(0, persisted.adFreeStreak | 0);
+    if (s && !s.streakCounted) {
+      s.streakCounted = true;
+      if (!s.adSeenThisLevel) {
+        streak += 1;
+        persisted.adFreeStreak = streak;
+        Persist.save(persisted);
+      }
+      snapshotRun();   // streakCounted/adSeenThisLevel живут и в savedRun
+    }
+    return streak;
+  }
+
+  function shouldShowInterstitialNow(justCompletedLevel, adSeenThisLevel, streak) {
     if (!window.Ads || !Ads.INTERSTITIAL_ENABLED) return false;
-    if (!flagged) return false;
-    if (justCompletedLevel < INTERSTITIAL_MIN_COMPLETED_LEVEL) return false;
+    if (justCompletedLevel < INTERSTITIAL_MIN_LEVEL) return false;
+    // На уровне уже была реклама — второй раз подряд не грузим.
+    if (adSeenThisLevel) return false;
+    if (streak < ADFREE_STREAK_FOR_INTERSTITIAL) return false;
     if (Date.now() - lastInterstitialAtMs < INTERSTITIAL_COOLDOWN_MS) return false;
     return true;
+  }
+
+  /** Отметить, что на текущем уровне игрок видел рекламу (любую). */
+  function markAdSeen() {
+    const s = State.get();
+    if (!s) return;
+    s.adSeenThisLevel = true;
+    snapshotRun();
   }
 
   /**
@@ -4020,6 +4081,10 @@ window.App = (() => {
     } finally {
       Persist.clearInterstitialPending();
       if (watched) lastInterstitialAtMs = Date.now();
+      // Реклама показана — серия «уровней без рекламы» начинается заново.
+      const p = Persist.load();
+      p.adFreeStreak = 0;
+      Persist.save(p);
       loadLevel(nextLevel);
     }
   }
@@ -4134,18 +4199,6 @@ window.App = (() => {
     });
   }
 
-  // Помечает текущий уровень как «дёрганый» — игрок использовал откат
-  // или бонусную колбу. По окончании уровня (onNext) это станет
-  // одним из условий показа интерстишла. snapshotRun сохранит флаг в LS,
-  // чтобы reload не сбросил его.
-  function flagInterstitialTrigger() {
-    const s = State.get();
-    if (s) {
-      s.interstitialFlagged = true;
-      // не зовём snapshotRun здесь — onUndo/onBonus уже сами зовут после.
-    }
-  }
-
   function loadLevel(levelNum, opts) {
     // Сначала проверяем savedRun: если есть и он для этого же уровня —
     // восстанавливаем поле, историю ходов и метаданные без новой генерации.
@@ -4235,7 +4288,8 @@ window.App = (() => {
         history: [],
         moves: 0,
         bonusUsedThisLevel: false,
-        interstitialFlagged: false,
+        adSeenThisLevel: false,
+        streakCounted: false,
         optimalSteps: s.optimalSteps,
         requireBonus: s.requireBonus,
         rating: s.rating,
@@ -4267,7 +4321,10 @@ window.App = (() => {
     s.history = (savedRun.history || []).map(h => ({ ...h }));
     s.moves = savedRun.moves || 0;
     s.bonusUsedThisLevel = !!savedRun.bonusUsedThisLevel;
-    s.interstitialFlagged = !!savedRun.interstitialFlagged;
+    // Флаги рекламы уровня: пережили reload — иначе игрок, посмотревший
+    // ролик и перезапустивший игру, получил бы интерстишл сразу после.
+    s.adSeenThisLevel = !!savedRun.adSeenThisLevel;
+    s.streakCounted   = !!savedRun.streakCounted;
     s.optimalSteps = savedRun.optimalSteps;
     s.requireBonus = !!savedRun.requireBonus;
     // rating может отсутствовать в сейвах, сделанных до перехода на кривую —
@@ -4297,7 +4354,8 @@ window.App = (() => {
       history: (s.history || []).map(h => ({ ...h })),
       moves: s.moves || 0,
       bonusUsedThisLevel: !!s.bonusUsedThisLevel,
-      interstitialFlagged: !!s.interstitialFlagged,
+      adSeenThisLevel: !!s.adSeenThisLevel,
+      streakCounted: !!s.streakCounted,
     });
   }
 
@@ -4402,7 +4460,6 @@ window.App = (() => {
     const persisted = Persist.load();
     persisted.stats.undoUsed = (persisted.stats.undoUsed || 0) + 1;
     Persist.save(persisted);
-    flagInterstitialTrigger();
     Render.renderAll();
     snapshotRun(); // откат — тоже состояние, его надо сохранить
   }
@@ -4591,6 +4648,9 @@ window.App = (() => {
         detach();
         addEnergy(ENERGY_REWARD);
         Analytics.event('energy_refill', { amount: ENERGY_REWARD });
+        // Ролик за молнии смотрят на переходе между уровнями — засчитываем
+        // его пройденному уровню, чтобы сразу за ним не влепить интерстишл.
+        markAdSeen();
         Render.hideNoEnergy();
         Render.toast(`+${ENERGY_REWARD} молний`);
         const resume = onRefilled || pendingLevelStart;
@@ -4618,14 +4678,25 @@ window.App = (() => {
   //   - не чаще одного раза за запуск приложения (rateUsShownThisSession);
   //   - никогда, если игрок уже нажимал «Оценить» (persisted.rateUsCompleted).
   // Порядок в onNext тоже прежний: Rate-us → интерстишл → загрузка уровня.
-  const RATEUS_FIRST_LEVEL = 5;   // первый показ — после прохождения L5
-  const RATEUS_EVERY       = 3;   // дальше каждые 3 уровня: L8, L11, L14, …
-  function shouldShowRateUs(justCompletedLevel) {
+  const RATEUS_MIN_LEVEL   = 4;                // первый показ — после L4
+  const RATEUS_COOLDOWN_MS = 24 * 60 * 60 * 1000;  // не чаще раза в сутки
+  /**
+   * Показ Rate-us. Окно занимает тот же слот, что и интерстишл (пауза между
+   * уровнями), поэтому показываем его ТОЛЬКО когда рекламы после этого
+   * уровня не будет — иначе игрок получил бы два экрана подряд.
+   *   willShowInterstitial — решение по рекламе, посчитанное в onNext.
+   */
+  function shouldShowRateUs(justCompletedLevel, willShowInterstitial) {
     if (rateUsShownThisSession) return false;
+    if (willShowInterstitial) return false;
     const persisted = Persist.load();
     if (persisted.rateUsCompleted) return false;
-    if (justCompletedLevel < RATEUS_FIRST_LEVEL) return false;
-    return (justCompletedLevel - RATEUS_FIRST_LEVEL) % RATEUS_EVERY === 0;
+    if (justCompletedLevel < RATEUS_MIN_LEVEL) return false;
+    // ВНИМАНИЕ: без `| 0`. Битовые операции обрезают до 32 бит, а Date.now()
+    // это ~1.75e12 — метка превратилась бы в мусор и кулдаун не работал бы.
+    const last = Number(persisted.rateUsLastShownAt) || 0;
+    if (last && Date.now() - last < RATEUS_COOLDOWN_MS) return false;
+    return true;
   }
 
   /**
@@ -4641,6 +4712,12 @@ window.App = (() => {
    */
   function showRateUsThen(callback) {
     rateUsShownThisSession = true;
+    // Метка показа для суточного кулдауна. Пишем в момент ПОКАЗА, а не по
+    // кнопке: «Может позже» и игнор окна должны отодвигать следующий
+    // вопрос одинаково.
+    const pShown = Persist.load();
+    pShown.rateUsLastShownAt = Date.now();
+    Persist.save(pShown);
     const onRate = () => {
       detachRateUsHandlers();
       Analytics.event('rate_clicked', { source: 'modal' });
@@ -4688,23 +4765,29 @@ window.App = (() => {
     /* HTML2APK:DEV_ONLY */ if (window.DevPanel) DevPanel.close(); /* /HTML2APK:DEV_ONLY */
     const s = State.get();
     const justCompletedLevel = s ? s.level : 0;
-    const flagged = !!(s && s.interstitialFlagged);
+    const adSeenThisLevel = !!(s && s.adSeenThisLevel);
     const persisted = Persist.load();
     const nextLevel = persisted.level;
 
-    // Цепочка: Rate-us (если пора) → интерстишл (если пора) → loadLevel.
-    // Rate-us ВСЕГДА ПЕРВЫМ, чтобы не показываться после рекламы.
-    const proceedAfterRateUs = () => {
-      if (shouldShowInterstitialNow(justCompletedLevel, flagged)) {
+    // Учитываем уровень в серии «без рекламы» и решаем про показы.
+    const streak = accountLevelForAds(s);
+    const willShowInterstitial = shouldShowInterstitialNow(justCompletedLevel, adSeenThisLevel, streak);
+
+    // Rate-us и интерстишл занимают один и тот же слот между уровнями и
+    // взаимоисключающи: окно показываем только на «тихих» уровнях, где
+    // рекламы не будет. Порядок в цепочке всё равно оставляем — Rate-us
+    // первым, чтобы он никогда не оказался ПОСЛЕ рекламы.
+    const proceed = () => {
+      if (willShowInterstitial) {
         presentInterstitialThenLoad(nextLevel);
       } else {
         loadLevel(nextLevel);
       }
     };
-    if (shouldShowRateUs(justCompletedLevel)) {
-      showRateUsThen(proceedAfterRateUs);
+    if (shouldShowRateUs(justCompletedLevel, willShowInterstitial)) {
+      showRateUsThen(proceed);
     } else {
-      proceedAfterRateUs();
+      proceed();
     }
   }
 
@@ -4729,7 +4812,7 @@ window.App = (() => {
         Persist.save(persisted);
         // Analytics: revive_used (per-app event).
         Analytics.event('revive_used', { level_num: s.level });
-        flagInterstitialTrigger();
+        markAdSeen();      // на этом уровне реклама была — интерстишл не покажем
         Render.renderAll();
         Render.toast('+1 колба (бонус)');
         snapshotRun(); // бонус добавил +1 пустую колбу — это новое состояние
