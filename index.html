@@ -758,6 +758,25 @@ body{
 <script src="remote/declaration.js"></script>
 
 <script>
+/* ЗНАЧЕНИЕ ИЗ УДАЛЁННОЙ КОНФИГУРАЦИИ, ИНАЧЕ КОНСТАНТА СБОРКИ.
+
+   Объявлен ДО всех модулей и в единственном экземпляре: файл собран из
+   нескольких IIFE, и своя копия помощника в каждом разошлась бы с остальными.
+
+   ЧИТАТЬ НАДО ПРИ ОБРАЩЕНИИ, а не запоминать при загрузке: конфиг приезжает по
+   сети через секунду-две после старта, и снятое один раз значение застыло бы
+   навсегда — правка в бакете не подействовала бы до перезапуска.
+
+   РЕЗЕРВ ОБЯЗАТЕЛЕН, и не только ради отказа сети: клиент собран из
+   ES2020-исходников, и достаточно старый WebView не разберёт его синтаксис —
+   тогда window.RemoteConfig не появится вовсе. Игра обязана работать как была.
+   ============================================================ */
+window.tuned = function tuned(key, fallback) {
+  const api = window.RemoteConfig;
+  const value = api ? api.rc(key) : undefined;
+  return typeof value === 'number' ? value : fallback;
+};
+
 /* ============================================================
    GlitterSort — single-file game logic
    ------------------------------------------------------------
@@ -975,9 +994,17 @@ window.Levels = (() => {
   const CURVE_CYCLE  = [4, 4, 7, 4, 4, 10];
   function ratingFor(n) {
     const i = (n | 0) - 1;
-    if (i <= 0) return CURVE_PREFIX[0];
-    if (i < CURVE_PREFIX.length) return CURVE_PREFIX[i];
-    return CURVE_CYCLE[(i - CURVE_PREFIX.length) % CURVE_CYCLE.length];
+    let r;
+    if (i <= 0) r = CURVE_PREFIX[0];
+    else if (i < CURVE_PREFIX.length) r = CURVE_PREFIX[i];
+    else r = CURVE_CYCLE[(i - CURVE_PREFIX.length) % CURVE_CYCLE.length];
+    // СДВИГ КРИВОЙ — одна ручка на всю игру: «сделать полегче» без выпуска
+    // обновления. Двигается вся кривая целиком, поэтому её РИТМ (два лёгких,
+    // один потяжелее, два лёгких, пиковый) сохраняется — а он и есть замысел.
+    // Зажим по краям обязателен: пресетов ровно десять, и рейтинг 11 означал
+    // бы уровень, который генератор не умеет собрать.
+    const shift = window.tuned ? window.tuned('difficulty_shift', 0) : 0;
+    return Math.max(1, Math.min(10, r + shift));
   }
 
   // Пресет рейтинга: сколько ходов должно быть в оптимальном решении (moves)
@@ -1407,7 +1434,7 @@ window.Levels = (() => {
     // Потолок на ОДИН BFS: нерешаемые исчерпываются мгновенно, решаемые на
     // наших полях считаются за единицы мс. Кандидат, не уложившийся сюда,
     // просто пропускается — он всё равно слишком тяжёлый для целей кривой.
-    const SOLVE_CAP_MS = 120;
+    const SOLVE_CAP_MS = window.tuned('solve_cap_ms', 120);
     const t0 = performance.now();
 
     let best = null, attempts = 0, solvableAttempts = 0;
@@ -2088,6 +2115,17 @@ window.Ads = (() => {
   // межстраничную почти не увидят.
   const INTERSTITIAL_ENABLED = true;
 
+  /**
+   * ГЛАВНЫЙ ВЫКЛЮЧАТЕЛЬ МЕЖСТРАНИЧНОЙ, и теперь его видно из админки.
+   *
+   * Нужен именно выключателем, а не порогом: если в отзывах начнут жаловаться
+   * на рекламу между уровнями, ждать выпуска обновления нельзя, а крутить
+   * пороги — значит гадать. `0` гасит и показы, и предзагрузку (трафик игрока).
+   */
+  function interstitialsOn() {
+    return window.tuned('interstitial_enabled', INTERSTITIAL_ENABLED ? 1 : 0) === 1;
+  }
+
   // Таймаут на ожидание callback'а от Java. Страховка от молчаливого
   // зависания SDK (нет fill / нет сети / unit на модерации). 120 сек —
   // Yandex rewarded видео макс ~60 сек + закрытие, interstitial 10-15 сек.
@@ -2124,7 +2162,7 @@ window.Ads = (() => {
       // Интерстишл прогреваем только когда формат включён — иначе незачем
       // жечь запросы к SDK за рекламу, которую мы не покажем.
       try {
-        if (INTERSTITIAL_ENABLED) window.YandexAds.preloadInterstitial(UNIT_INTERSTITIAL);
+        if (interstitialsOn()) window.YandexAds.preloadInterstitial(UNIT_INTERSTITIAL);
         window.YandexAds.preloadRewarded(UNIT_REWARDED);
       } catch (e) { console.warn('[Ads] preload skipped:', e); }
       return Promise.resolve();
@@ -2155,7 +2193,7 @@ window.Ads = (() => {
    * При INTERSTITIAL_ENABLED=false — no-op на любом backend'е.
    */
   function preloadInterstitial() {
-    if (!INTERSTITIAL_ENABLED) return;
+    if (!interstitialsOn()) return;
     if (backend === 'native' && window.YandexAds && typeof window.YandexAds.preloadInterstitial === 'function') {
       try { window.YandexAds.preloadInterstitial(UNIT_INTERSTITIAL); } catch (e) {}
     }
@@ -2180,7 +2218,7 @@ window.Ads = (() => {
     // Вторая линия обороны: App и так не зовёт показ при выключенном
     // флаге (shouldShowInterstitialNow), но если какой-то путь всё же
     // сюда дойдёт — резолвим сразу, без показа и без preload'а.
-    if (!INTERSTITIAL_ENABLED) {
+    if (!interstitialsOn()) {
       console.log('[Ads] interstitial disabled — skip');
       return Promise.resolve();
     }
@@ -2275,7 +2313,10 @@ window.Ads = (() => {
   function getBackend() { return backend; }
 
   return { init, showInterstitial, preloadInterstitial, showRewarded, preloadRewarded, getBackend,
-           INTERSTITIAL_ENABLED, UNIT_INTERSTITIAL, UNIT_REWARDED };
+           // Выключатель отдаём ФУНКЦИЕЙ: константа `INTERSTITIAL_ENABLED`
+           // осталась дефолтом сборки, а решение принимает `interstitialsOn()` —
+           // иначе потребители читали бы значение мимо конфига.
+           interstitialsOn, INTERSTITIAL_ENABLED, UNIT_INTERSTITIAL, UNIT_REWARDED };
 })();
 
 /* ============================================================
@@ -2585,7 +2626,10 @@ window.PushScheduler = (function () {
     let scheduled = 0; const log = [];
     for (let dayOffset = 0; dayOffset < days; dayOffset++) {
       let perDay = 0;
-      for (let i = 0; i < slots.length && perDay < maxPerDay; i++) {
+      // Сколько напоминаний в день — из конфига в МОМЕНТ ПЛАНИРОВАНИЯ:
+      // расписание пересобирается при каждом запуске, и правка доедет сама.
+      const dayCap = window.tuned('push_max_per_day', maxPerDay);
+      for (let i = 0; i < slots.length && perDay < dayCap; i++) {
         const slot = slots[i];
         const base = new Date();
         base.setDate(base.getDate() + dayOffset);
@@ -3350,6 +3394,26 @@ window.DevPanel = (() => {
     wire();
     refreshLevelButtons();
     loadIntoUI(State.get()?.level || 1);
+    mountCloudParams();
+  }
+
+  /**
+   * Список ВСЕХ параметров из облака — строит общий модуль админки.
+   *
+   * Что крутится в админке, то же крутится здесь: два самописных списка
+   * разъехались бы, и узнать об этом можно было бы только заметив, что поля
+   * нет. Правки живут в локальном слое подмен — бакет от них не меняется.
+   */
+  function mountCloudParams() {
+    const host = document.createElement('div');
+    host.style.marginTop = '14px';
+    const title = document.createElement('div');
+    title.textContent = 'Параметры из облака';
+    title.style.cssText = 'font-weight:600;margin:0 0 6px';
+    $body.appendChild(title);
+    $body.appendChild(host);
+    if (window.RemoteConfig && window.RemoteConfig.mountRcParams) window.RemoteConfig.mountRcParams(host);
+    else host.textContent = 'Клиент конфига не загрузился — параметров нет.';
   }
 
   function refreshLevelButtons() {
@@ -4000,11 +4064,8 @@ window.App = (() => {
    * работать как была: иначе удалённая настройка из страховки превращается в
    * новый способ уронить игру всем сразу.
    */
-  function tuned(key, fallback) {
-    const api = window.RemoteConfig;
-    const value = api ? api.rc(key) : undefined;
-    return typeof value === 'number' ? value : fallback;
-  }
+  /** Помощник общий и объявлен в начале файла — см. пояснение там. */
+  const tuned = window.tuned;
 
   let session = null;       // { levelNum, params }
   // winLocked — глобальный замок, который активен ТОЛЬКО когда открыт
@@ -4077,7 +4138,7 @@ window.App = (() => {
   }
 
   function shouldShowInterstitialNow(justCompletedLevel, adSeenThisLevel, streak) {
-    if (!window.Ads || !Ads.INTERSTITIAL_ENABLED) return false;
+    if (!window.Ads || !Ads.interstitialsOn()) return false;
     if (justCompletedLevel < tuned('interstitial_min_level', INTERSTITIAL_MIN_LEVEL)) return false;
     // На уровне уже была реклама — второй раз подряд не грузим.
     if (adSeenThisLevel) return false;
@@ -4171,6 +4232,12 @@ window.App = (() => {
     // неразмеченные группы во всех сессиях подряд.
     if (window.RemoteConfig) {
       RemoteConfig.configure(window.RC_DECLARATION);
+      // МОСТ ДО ПЕРВОГО СОБЫТИЯ: он же перехватывает то, что игра отправляет в
+      // аналитику и в рекламу, а session_start уходит в первые секунды.
+      if (RemoteConfig.installTestBridge) {
+        RemoteConfig.installTestBridge({ appId: 'com.terekh.glittersort', versionBase: '1.0' });
+        installTestActions();
+      }
       RemoteConfig.initRemoteConfig({
         appId: 'com.terekh.glittersort',
         versionBase: '1.0',
@@ -4230,7 +4297,7 @@ window.App = (() => {
     // остаться interstitialPendingAt — иначе первый же запуск новой
     // версии встретил бы их именно той рекламой, которую мы убираем.
     const pendingAt = Persist.loadInterstitialPending();
-    if (pendingAt && Ads.INTERSTITIAL_ENABLED && Date.now() - pendingAt < INTERSTITIAL_RECOVERY_MS) {
+    if (pendingAt && Ads.interstitialsOn() && Date.now() - pendingAt < INTERSTITIAL_RECOVERY_MS) {
       console.log('[Ads] recovery: показываем недосмотренный интерстишл');
       wireEvents();
       await presentInterstitialThenLoad(persisted.level || 1);
@@ -4579,7 +4646,7 @@ window.App = (() => {
     //     чтобы намерение читалось в коде).
     // На native — реальный preload в Yandex SDK; на yagames/mock — no-op.
     if (window.Ads) {
-      if (Ads.INTERSTITIAL_ENABLED && Ads.preloadInterstitial) {
+      if (Ads.interstitialsOn() && Ads.preloadInterstitial) {
         try { Ads.preloadInterstitial(); } catch (_e) {}
       }
       if (Ads.preloadRewarded) { try { Ads.preloadRewarded(); } catch (_e) {} }
@@ -4912,7 +4979,65 @@ window.App = (() => {
     });
   }
 
-  return { start, loadLevel };
+  /**
+   * ТЕСТОВЫЙ МОСТ: то же, что делает дев-панель, но вызовом извне.
+   *
+   * Объявляется ЗДЕСЬ, потому что только у [APP] есть и загрузка уровня, и
+   * энергия, и сейв. Мост исполняет только ПОДПИСАННУЮ команду, и приватного
+   * ключа в APK нет — поэтому он остаётся и в релизной сборке, где дев-панель
+   * вырезана целиком. `state` важнее остального: действие без чтения состояния
+   * нечем подтвердить.
+   */
+  function installTestActions() {
+    if (!window.RemoteConfig || !RemoteConfig.registerTestActions) return;
+    const num = (v, d) => (Number.isFinite(Number(v)) ? Number(v) : d);
+    RemoteConfig.registerTestActions({
+      state: {
+        note: 'снимок: уровень, молнии, пройдено, серия без рекламы',
+        run: () => {
+          const p = Persist.load();
+          return {
+            level: p.level,
+            totalCompleted: p.totalCompleted,
+            energy: p.energy,
+            adFreeStreak: p.adFreeStreak,
+            rateUsCompleted: p.rateUsCompleted,
+            sessionCount: p.sessionCount,
+            rating: Levels.ratingFor(p.level),
+          };
+        },
+      },
+      'level.set': {
+        note: 'запустить уровень по номеру',
+        args: { level: 'число' },
+        run: (args) => {
+          const level = Math.max(1, Math.round(num(args.level, 1)));
+          const p = Persist.load();
+          p.level = level;
+          Persist.save(p);
+          loadLevel(level);
+          return { level, rating: Levels.ratingFor(level) };
+        },
+      },
+      'grant.energy': {
+        note: 'добавить молний',
+        args: { amount: 'число' },
+        run: (args) => {
+          addEnergy(Math.round(num(args.amount, 5)));
+          return { energy: getEnergy() };
+        },
+      },
+      'progress.reset': {
+        note: 'стереть сейв целиком; после этого нужен app.reload',
+        run: () => {
+          Persist.clearAll();
+          return { wiped: true };
+        },
+      },
+    });
+  }
+
+  return { start, loadLevel, installTestActions };
 })();
 
 document.addEventListener('DOMContentLoaded', () => App.start());
