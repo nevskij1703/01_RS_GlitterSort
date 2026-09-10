@@ -4178,7 +4178,9 @@ window.App = (() => {
         // A/B, поэтому жребий не меняется от запуска к запуску.
         installId: Persist.getUserId()
       }).then(() => {
-        Analytics.setAbCohorts(RemoteConfig.rcCohorts().join(','));
+        // `cohortLabel`, а не `join`: вне тестов нужна метка `default`.
+        // Пустая строка означала бы «конфиг ещё не доехал», а это другое.
+        Analytics.setAbCohorts(RemoteConfig.cohortLabel(RemoteConfig.rcCohorts()));
       }).catch(() => {
         /* нет сети — играем на значениях сборки, это штатно */
       }).then(() => {
