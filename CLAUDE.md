@@ -41,7 +41,14 @@
 
 ### Что делает APK-сборщик
 
-Команда `html2apk -YandexAdsBridge -ProjectFolder <thisDir> -AppName "..." -AppId com.terekh.glittersort -OutputFile <...>.apk` дополнительно:
+Флаг `-YandexAdsBridge` передавать руками **не нужно и не надо**: он берётся из
+`"yandexAdsBridge": true` в `.claude/build-config.json`. Источник правды один —
+конфиг. Руками флаг терялся молча: команду копируют, забывают флаг, и сборка
+уезжает в стор без монетизации при полностью рабочем рекламном коде в JS. Гейт
+пяти обязательных SDK в `prepare-release-candidate` смотрит тоже в конфиг.
+
+Сборка (`html2apk -ProjectFolder <thisDir> -OutputFile <...>.apk`) с этим флагом
+дополнительно:
 1. Добавит `implementation 'com.yandex.android:mobileads:7.0.1'` в `android/app/build.gradle`.
 2. Добавит `ACCESS_NETWORK_STATE` permission в `AndroidManifest.xml`.
 3. Создаст `YandexAdsBridge.java` рядом с MainActivity.

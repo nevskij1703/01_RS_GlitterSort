@@ -56,12 +56,14 @@ Unit-ID в коде:
 
 ```
 & "$env:LOCALAPPDATA\Programs\html2apk\html2apk.ps1" `
-  -ProjectFolder "C:\Users\Александр\Desktop\Claude\01_RS_GlitterSort" `
-  -AppName "GlitterSort" `
-  -AppId "com.terekh.glittersort" `
-  -OutputFile "$env:USERPROFILE\Downloads\GlitterSort.apk" `
-  -YandexAdsBridge
+  -ProjectFolder "C:\Users\Александр\Desktop\Claude\RuStore-games\01_RS_GlitterSort" `
+  -OutputFile "$env:USERPROFILE\Downloads\GlitterSort.apk"
 ```
+
+`-YandexAdsBridge`, `-AppName` и `-AppId` руками **не передавать**: они берутся
+из `.claude/build-config.json`. Источник правды один — конфиг. Флаг в командной
+строке терялся молча: команду копируют, забывают флаг, и сборка уезжает в стор
+без монетизации при полностью рабочем рекламном коде.
 
 html2apk:
 - добавит `implementation 'com.yandex.android:mobileads:7.0.1'` в `android/app/build.gradle`;

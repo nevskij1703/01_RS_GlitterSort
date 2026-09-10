@@ -7,6 +7,7 @@
   "immersive": true,
   "statusBarStyle": "light",
   "rustoreReviewSdk": true,
+  "yandexAdsBridge": true,
   "localNotifications": true,
   "yandexAppMetrica": true,
   "minify": true,
