@@ -13,5 +13,6 @@
   "minify": true,
   "appMetricaApiKey": "332bead0-5885-42f9-b4bd-21bfb5254167",
   "minSdk": null,
-  "targetSdk": null
+  "targetSdk": null,
+  "versionBase": "1.0"
 }

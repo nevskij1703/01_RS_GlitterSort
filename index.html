@@ -750,6 +750,13 @@ body{
 
 <div class="toast" id="toast"></div>
 
+<!-- Удалённая конфигурация (общий модуль ../admin, копии генерируемые).
+     Отдельными файлами, а не инлайном: источник живёт в admin и раскладывается
+     оттуда скриптом, а вписанная сюда копия разошлась бы с ним молча.
+     ДО игрового кода: он спрашивает значения с первого экрана. -->
+<script src="remote/remoteConfig.iife.js"></script>
+<script src="remote/declaration.js"></script>
+
 <script>
 /* ============================================================
    GlitterSort — single-file game logic
@@ -1973,6 +1980,12 @@ window.Persist = (() => {
    ============================================================ */
 window.Analytics = (() => {
   let configured = false;
+
+  // Группы A/B этого устройства — 'pacing:often'. Уходит параметром `ab` в
+  // КАЖДОМ событии, и без этого тест бессмыслен: разбиение есть, а сравнить
+  // группы нечем. Отдельным сеттером, а не полем configure: контекст
+  // заводится сразу, а группы приезжают из сети и позже.
+  let abLabel = '';
   const ctx = {
     appName: 'unknown',
     appVersion: '1.0.0',
@@ -2011,6 +2024,8 @@ window.Analytics = (() => {
     } catch (e) { console.warn('[analytics] consumePushTemplateId failed:', e); }
   }
 
+  function setAbCohorts(label) { abLabel = label || ''; }
+
   function event(name, params) {
     if (!configured) console.warn('[analytics] event before configure():', name);
     const payload = Object.assign({}, params || {}, {
@@ -2018,6 +2033,7 @@ window.Analytics = (() => {
       app_version: ctx.appVersion,
       platform:    ctx.platform,
       user_id:     ctx.userId,
+      ab:          abLabel,
     });
     if (window.AppMetrica) {
       try { window.AppMetrica.reportEvent(name, JSON.stringify(payload)); }
@@ -2046,7 +2062,7 @@ window.Analytics = (() => {
     }
   }
 
-  return { configure, event, adShown, setUser };
+  return { configure, setAbCohorts, event, adShown, setUser };
 })();
 
 /* ============================================================
@@ -3970,6 +3986,26 @@ window.Tutorial = (() => {
    [APP] — bootstrap, обработчики кликов, win flow.
    ============================================================ */
 window.App = (() => {
+  /**
+   * Значение из удалённой конфигурации, иначе константа сборки.
+   *
+   * Читается ПРИ ОБРАЩЕНИИ, а не запоминается при загрузке страницы: конфиг
+   * приезжает из сети через секунду-две после старта, и значение, снятое
+   * один раз, застыло бы навсегда — правка в бакете не подействовала бы до
+   * перезапуска игры.
+   *
+   * РЕЗЕРВ ОБЯЗАТЕЛЕН, и не только ради отказа сети. Клиент конфига собран из
+   * ES2020-исходников, и достаточно старый WebView не разберёт его синтаксис
+   * — тогда window.RemoteConfig не появится вовсе. Игра в этом случае обязана
+   * работать как была: иначе удалённая настройка из страховки превращается в
+   * новый способ уронить игру всем сразу.
+   */
+  function tuned(key, fallback) {
+    const api = window.RemoteConfig;
+    const value = api ? api.rc(key) : undefined;
+    return typeof value === 'number' ? value : fallback;
+  }
+
   let session = null;       // { levelNum, params }
   // winLocked — глобальный замок, который активен ТОЛЬКО когда открыт
   // модал победы. Запрещает любые клики по полю до нажатия «Дальше».
@@ -4007,6 +4043,10 @@ window.App = (() => {
   //     сдвигается на следующий уровень.
   //   - RECOVERY: если предыдущий показ не зарезолвился (игрок закрыл
   //     приложение внутри рекламы) и прошло < 5 мин — доигрываем на старте.
+  //
+  // Три первых числа можно менять из админки БЕЗ выпуска обновления
+  // (remote-config.json + admin/cloud/config/com.terekh.glittersort.json).
+  // Константы остаются резервом: `tuned()` берёт их, когда конфига нет.
   const INTERSTITIAL_MIN_LEVEL            = 3;   // не раньше L3
   const ADFREE_STREAK_FOR_INTERSTITIAL    = 2;   // каждые 2 уровня без рекламы
   const INTERSTITIAL_COOLDOWN_MS          = 2 * 60 * 1000;  // 2 минуты
@@ -4038,11 +4078,13 @@ window.App = (() => {
 
   function shouldShowInterstitialNow(justCompletedLevel, adSeenThisLevel, streak) {
     if (!window.Ads || !Ads.INTERSTITIAL_ENABLED) return false;
-    if (justCompletedLevel < INTERSTITIAL_MIN_LEVEL) return false;
+    if (justCompletedLevel < tuned('interstitial_min_level', INTERSTITIAL_MIN_LEVEL)) return false;
     // На уровне уже была реклама — второй раз подряд не грузим.
     if (adSeenThisLevel) return false;
-    if (streak < ADFREE_STREAK_FOR_INTERSTITIAL) return false;
-    if (Date.now() - lastInterstitialAtMs < INTERSTITIAL_COOLDOWN_MS) return false;
+    if (streak < tuned('interstitial_adfree_streak', ADFREE_STREAK_FOR_INTERSTITIAL)) return false;
+    // Секунды, а не миллисекунды: это поле правит человек в админке, и «120»
+    // там читается, а «120000» приглашает опечатку на порядок.
+    if (Date.now() - lastInterstitialAtMs < tuned('interstitial_cooldown_sec', INTERSTITIAL_COOLDOWN_MS / 1000) * 1000) return false;
     return true;
   }
 
@@ -4115,7 +4157,36 @@ window.App = (() => {
       appVersion: '1.0.0',
       userId: Persist.getUserId()
     });
-    Analytics.event('session_start');
+
+    // Удалённая конфигурация (общий модуль ../admin). Объявление СИНХРОННО:
+    // с этой секунды tuned() отдаёт значения сборки, даже если сети нет.
+    //
+    // Загрузка первый экран НЕ блокирует: конфиг нужен на переходе между
+    // уровнями, а это минутами позже. У модуля свой таймаут 4 с.
+    //
+    // SESSION_START ЖДЁТ ГРУППУ. Событие, ушедшее до ответа сети, уходит без
+    // параметра `ab` — и тогда верх воронки размечен хуже низа, а доли по
+    // шагам перестают быть конверсией. Цена — потерянный session_start у
+    // того, кто закрыл игру в первые секунды; это меньшее искажение, чем
+    // неразмеченные группы во всех сессиях подряд.
+    if (window.RemoteConfig) {
+      RemoteConfig.configure(window.RC_DECLARATION);
+      RemoteConfig.initRemoteConfig({
+        appId: 'com.terekh.glittersort',
+        versionBase: '1.0',
+        // Тот же идентификатор, что в аналитике: из него считаются группы
+        // A/B, поэтому жребий не меняется от запуска к запуску.
+        installId: Persist.getUserId()
+      }).then(() => {
+        Analytics.setAbCohorts(RemoteConfig.rcCohorts().join(','));
+      }).catch(() => {
+        /* нет сети — играем на значениях сборки, это штатно */
+      }).then(() => {
+        Analytics.event('session_start');
+      });
+    } else {
+      Analytics.event('session_start');
+    }
 
     // Push-уведомления (Local Notifications). Источник правды enabled —
     // Persist (pushEnabled поле). Прокидываем через __getPushEnabled hook.
@@ -4470,10 +4541,22 @@ window.App = (() => {
     const persisted = Persist.load();
     // Analytics: level_complete. s.level — текущий уровень, s.moves — кол-во
     // ходов, persisted.totalCompleted ещё ДО инкремента ниже.
+    const levelNum = s ? s.level : 1;
     Analytics.event('level_complete', {
-      level_num: s ? s.level : 1,
+      level_num: levelNum,
       moves: s ? s.moves : 0
     });
+
+    // РУБЕЖНОЕ СОБЫТИЕ отдельным именем, а не параметром уровня. Иначе
+    // прохождение нельзя разрезать по группам A/B: параметры событий в
+    // отчётах плоские, и «номер уровня И группа» одной строкой не
+    // выражаются. Список рубежей — в remote-config.json, его же читает
+    // админка. Повтор безвреден: воронка считает разных людей.
+    const decl = window.RC_DECLARATION || {};
+    const milestone = window.RemoteConfig
+      ? window.RemoteConfig.milestoneEvent(levelNum, (decl.funnel || {}).milestones)
+      : null;
+    if (milestone) Analytics.event(milestone, { level_num: levelNum });
     persisted.totalCompleted = (persisted.totalCompleted || 0) + 1;
     persisted.stats.totalMoves = (persisted.stats.totalMoves || 0) + (s ? s.moves : 0);
     // Следующий уровень сохраним заранее, чтобы перезагрузка после победы
@@ -4534,15 +4617,17 @@ window.App = (() => {
   let pendingLevelStart = null;
 
   function getEnergy() { return Math.max(0, Persist.load().energy | 0); }
-  function hasEnergy() { return getEnergy() >= ENERGY_PER_LEVEL; }
+  function hasEnergy() { return getEnergy() >= tuned('energy_per_level', ENERGY_PER_LEVEL); }
   function spendEnergy() {
     const p = Persist.load();
     const cur = Math.max(0, p.energy | 0);
-    if (cur < ENERGY_PER_LEVEL) return false;
-    p.energy = cur - ENERGY_PER_LEVEL;
+    const price = tuned('energy_per_level', ENERGY_PER_LEVEL);
+    const cap = tuned('energy_regen_cap', ENERGY_REGEN_CAP);
+    if (cur < price) return false;
+    p.energy = cur - price;
     // Запас опустился ниже потолка — с этого момента идёт отсчёт часа до
     // следующей бесплатной молнии.
-    if (cur >= ENERGY_REGEN_CAP && p.energy < ENERGY_REGEN_CAP) {
+    if (cur >= cap && p.energy < cap) {
       p.energyRegenAt = Date.now();
     }
     Persist.save(p);
@@ -4554,7 +4639,7 @@ window.App = (() => {
     p.energy = Math.max(0, p.energy | 0) + n;
     // Запас снова на потолке или выше — таймер восстановления останавливаем,
     // иначе позже начислилось бы «за простой на полном запасе».
-    if (p.energy >= ENERGY_REGEN_CAP) p.energyRegenAt = Date.now();
+    if (p.energy >= tuned('energy_regen_cap', ENERGY_REGEN_CAP)) p.energyRegenAt = Date.now();
     Persist.save(p);
     Render.renderEnergy({ pulse: true });
   }
@@ -4571,8 +4656,13 @@ window.App = (() => {
     const p = Persist.load();
     const now = Date.now();
     const energy = Math.max(0, p.energy | 0);
+    // Оба значения снимаем ОДИН раз на вызов: якорь двигается на
+    // `ticks * regenMs`, и разные значения в двух половинах расчёта означали
+    // бы потерянные или подаренные минуты.
+    const cap = tuned('energy_regen_cap', ENERGY_REGEN_CAP);
+    const regenMs = tuned('energy_regen_minutes', ENERGY_REGEN_MS / 60000) * 60000;
 
-    if (energy >= ENERGY_REGEN_CAP) {
+    if (energy >= cap) {
       // Держим якорь свежим, но не пишем сейв на каждый тик.
       if (!Number.isFinite(p.energyRegenAt) || now - p.energyRegenAt > 30 * 1000) {
         p.energyRegenAt = now;
@@ -4587,13 +4677,13 @@ window.App = (() => {
       Persist.save(p);
       return 0;
     }
-    const ticks = Math.floor((now - p.energyRegenAt) / ENERGY_REGEN_MS);
+    const ticks = Math.floor((now - p.energyRegenAt) / regenMs);
     if (ticks <= 0) return 0;
-    const gain = Math.min(ticks, ENERGY_REGEN_CAP - energy);
+    const gain = Math.min(ticks, cap - energy);
     p.energy = energy + gain;
-    p.energyRegenAt = (p.energy >= ENERGY_REGEN_CAP)
-      ? now                                        // добрали до потолка — стоп
-      : p.energyRegenAt + ticks * ENERGY_REGEN_MS; // остаток минут сохраняем
+    p.energyRegenAt = (p.energy >= cap)
+      ? now                                  // добрали до потолка — стоп
+      : p.energyRegenAt + ticks * regenMs;   // остаток минут сохраняем
     Persist.save(p);
     Render.renderEnergy({ pulse: gain > 0 });
     return gain;
@@ -4646,13 +4736,16 @@ window.App = (() => {
         // Не досмотрел — попап оставляем открытым, можно попробовать снова.
         if (!watched) { Render.toast('Реклама не была досмотрена'); return; }
         detach();
-        addEnergy(ENERGY_REWARD);
-        Analytics.event('energy_refill', { amount: ENERGY_REWARD });
+        // Одно значение на все три строки: разойдись они — игрок увидел бы в
+        // тосте одно число, а в счётчике другое.
+        const reward = tuned('energy_reward', ENERGY_REWARD);
+        addEnergy(reward);
+        Analytics.event('energy_refill', { amount: reward });
         // Ролик за молнии смотрят на переходе между уровнями — засчитываем
         // его пройденному уровню, чтобы сразу за ним не влепить интерстишл.
         markAdSeen();
         Render.hideNoEnergy();
-        Render.toast(`+${ENERGY_REWARD} молний`);
+        Render.toast(`+${reward} молний`);
         const resume = onRefilled || pendingLevelStart;
         pendingLevelStart = null;
         if (resume) resume();
@@ -4678,6 +4771,8 @@ window.App = (() => {
   //   - не чаще одного раза за запуск приложения (rateUsShownThisSession);
   //   - никогда, если игрок уже нажимал «Оценить» (persisted.rateUsCompleted).
   // Порядок в onNext тоже прежний: Rate-us → интерстишл → загрузка уровня.
+  // Оба числа правятся из админки; константы — резерв на случай, когда
+  // конфига нет вовсе.
   const RATEUS_MIN_LEVEL   = 4;                // первый показ — после L4
   const RATEUS_COOLDOWN_MS = 24 * 60 * 60 * 1000;  // не чаще раза в сутки
   /**
@@ -4691,11 +4786,12 @@ window.App = (() => {
     if (willShowInterstitial) return false;
     const persisted = Persist.load();
     if (persisted.rateUsCompleted) return false;
-    if (justCompletedLevel < RATEUS_MIN_LEVEL) return false;
+    if (justCompletedLevel < tuned('rateus_min_level', RATEUS_MIN_LEVEL)) return false;
     // ВНИМАНИЕ: без `| 0`. Битовые операции обрезают до 32 бит, а Date.now()
     // это ~1.75e12 — метка превратилась бы в мусор и кулдаун не работал бы.
     const last = Number(persisted.rateUsLastShownAt) || 0;
-    if (last && Date.now() - last < RATEUS_COOLDOWN_MS) return false;
+    const cooldownMs = tuned('rateus_cooldown_hours', RATEUS_COOLDOWN_MS / 3600000) * 3600000;
+    if (last && Date.now() - last < cooldownMs) return false;
     return true;
   }
 
