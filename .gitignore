@@ -10,3 +10,5 @@ node_modules/
 .claude/worktrees/
 # Рабочие референсы/исходники для скриншотов (готовые .png в screenshots/ коммитятся)
 Store_Info/screenshots/рефы/
+# Снимки, которые оставляют инструменты браузера. Магазинные — 01..04.png.
+Store_Info/screenshots/call_*.png

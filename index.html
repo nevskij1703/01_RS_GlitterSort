@@ -774,7 +774,11 @@ body{
 window.tuned = function tuned(key, fallback) {
   const api = window.RemoteConfig;
   const value = api ? api.rc(key) : undefined;
-  return typeof value === 'number' ? value : fallback;
+  // ТИП ЗАДАЁТ РЕЗЕРВ, а не проверка на `number`. Почти все ключи числовые, но
+  // кривая сложности — строка, и жёсткая проверка отбрасывала бы её молча:
+  // конфиг применился, а игра осталась на своей кривой. Сравнение с типом
+  // резерва заодно страхует от конфига чужой версии, где ключ сменил смысл.
+  return typeof value === typeof fallback && value !== null ? value : fallback;
 };
 
 /* ============================================================
@@ -990,12 +994,31 @@ window.Levels = (() => {
   //   L5+    — цикл:    4, 4, 7, 4, 4, 10   (повторяется бесконечно)
   // То есть 1-3-3-6 | 4-4-7-4-4-10 | 4-4-7-4-4-10 | ...
   // Ритм цикла: два лёгких, один потяжелее, два лёгких, один пиковый.
+  // ТА ЖЕ КРИВАЯ ОДНОЙ СТРОКОЙ — это дефолт ключа `difficulty_curve`, и правится
+  // она из облака целиком: и разгон, и ритм цикла, и его длина. До скобки —
+  // разгон по уровням, в скобке — бесконечный цикл.
+  const CURVE_TEXT   = '1-3-3-6-(4-4-7-4-4-10)';
+  // Резерв на случай, когда разбирать строку НЕЧЕМ: старый WebView не понимает
+  // ES2020, и тогда `window.RemoteConfig` не появляется вовсе. Это та же
+  // кривая, что в CURVE_TEXT, просто уже разобранная.
   const CURVE_PREFIX = [1, 3, 3, 6];
   const CURVE_CYCLE  = [4, 4, 7, 4, 4, 10];
+
+  /** Кривая из конфига, разобранная общим кодом. `null` — разбирать нечем. */
+  function curveNow() {
+    const rc = window.RemoteConfig;
+    if (!rc || !rc.parseCurve) return null;
+    // Читаем при обращении, как и всё остальное: правка в облаке обязана
+    // подействовать на следующем же уровне, а не после перезапуска.
+    return rc.parseCurve(window.tuned('difficulty_curve', CURVE_TEXT), { min: 1, max: 10 });
+  }
+
   function ratingFor(n) {
     const i = (n | 0) - 1;
+    const curve = curveNow();
     let r;
-    if (i <= 0) r = CURVE_PREFIX[0];
+    if (curve) r = window.RemoteConfig.curveRating(curve, n);
+    else if (i <= 0) r = CURVE_PREFIX[0];
     else if (i < CURVE_PREFIX.length) r = CURVE_PREFIX[i];
     else r = CURVE_CYCLE[(i - CURVE_PREFIX.length) % CURVE_CYCLE.length];
     // СДВИГ КРИВОЙ — одна ручка на всю игру: «сделать полегче» без выпуска
@@ -1734,6 +1757,17 @@ window.Migrations = (() => {
       if ('interstitialCounter' in state) delete state.interstitialCounter;
       return state;
     },
+    8: (state) => {
+      // v7 → v8: стартовый запас молний стал ключом конфига (`energy_start`),
+      // и его правку надо применять ОДИН раз — отсюда флаг.
+      //
+      // Тем, кто уже играет, ставим `true`: свои стартовые молнии они получили
+      // давно, и поправка на разницу с бакетом отняла бы у них запас посреди
+      // игры. Флаг `false` бывает только у сейва, рождённого из DEFAULTS, то
+      // есть у настоящего нового игрока.
+      if (typeof state.startAdjusted !== 'boolean') state.startAdjusted = true;
+      return state;
+    },
   };
 
   function getCurrentSchemaVersion() {
@@ -1793,7 +1827,17 @@ window.Persist = (() => {
     adFreeStreak: 0,
     // Энергия: запуск нового уровня стоит 1 молнию, стартовый запас 10,
     // рекламный ролик даёт +5. См. migration[5] и ENERGY_* в [APP].
+    //
+    // 10 — значение СБОРКИ, оно же дефолт ключа `energy_start`. Из облака
+    // стартовый запас правится поправкой после ответа сети, а не здесь:
+    // сейв рождается раньше (его создаёт `getUserId()` для аналитики), и
+    // прочитанный тут ключ вернул бы значение сборки каждому новому игроку.
+    // См. `applyStartGrant` в [APP] и `startAdjusted` ниже.
     energy: 10,
+    // Поправка стартового запаса из конфига ещё не применялась. `false`
+    // бывает только у свежесозданного сейва: migration[8] ставит уже
+    // играющим `true`, чтобы у них ничего не отняли и не добавили.
+    startAdjusted: false,
     // Якорь пассивного восстановления (+1 молния в час, но только пока
     // запас ниже ENERGY_REGEN_CAP). 0 = «ещё не считали», applyEnergyRegen
     // проставит при первом запуске. См. migration[6].
@@ -2622,7 +2666,9 @@ window.PushScheduler = (function () {
     if (hasBridge()) { try { window.LocalNotifications.cancelAll(); } catch (e) {} }
     const state = readState();
     const slots = ['morning', 'lunch', 'evening', 'night'];
-    const days = Math.ceil(HORIZON_HOURS / 24);
+    // Горизонт — тоже в момент планирования, по той же причине, что и dayCap.
+    const horizonHours = window.tuned('push_horizon_hours', HORIZON_HOURS);
+    const days = Math.ceil(horizonHours / 24);
     let scheduled = 0; const log = [];
     for (let dayOffset = 0; dayOffset < days; dayOffset++) {
       let perDay = 0;
@@ -2634,7 +2680,7 @@ window.PushScheduler = (function () {
         const base = new Date();
         base.setDate(base.getDate() + dayOffset);
         const at = nextSlotDate(slot, base);
-        if (!at || at.getTime() > Date.now() + HORIZON_HOURS * 3600000) continue;
+        if (!at || at.getTime() > Date.now() + horizonHours * 3600000) continue;
         if (at.getTime() <= Date.now() + 30000) continue;
         const tmpl = pickTemplateForSlot(slot, at, state, gameState);
         if (!tmpl) continue;
@@ -3972,8 +4018,8 @@ window.Tutorial = (() => {
         // Свежий re-eval перед каждым повтором — если игрок не среагировал
         // и cтранным образом изменилось состояние, возьмём новую цель.
         nextStep();
-      }, GAP_BETWEEN_CYCLES_MS);
-    }, HAND_VISIBLE_MS);
+      }, window.tuned('hint_gap_ms', GAP_BETWEEN_CYCLES_MS));
+    }, window.tuned('hint_hand_ms', HAND_VISIBLE_MS));
   }
 
   function showHandAtTarget() {
@@ -4176,7 +4222,8 @@ window.App = (() => {
     try {
       const result = await Promise.race([
         Ads.showInterstitial().then(() => 'done'),
-        new Promise(resolve => setTimeout(() => resolve('timeout'), INTERSTITIAL_SHOW_TIMEOUT_MS)),
+        new Promise(resolve => setTimeout(() => resolve('timeout'),
+          tuned('interstitial_show_timeout_sec', INTERSTITIAL_SHOW_TIMEOUT_MS / 1000) * 1000)),
       ]);
       watched = result === 'done';
     } catch (e) {
@@ -4251,9 +4298,17 @@ window.App = (() => {
       }).catch(() => {
         /* нет сети — играем на значениях сборки, это штатно */
       }).then(() => {
+        // Здесь, а не при создании сейва: стартовый запас правится из облака,
+        // и раньше этой секунды значение ключа неизвестно. Подробности —
+        // в `applyStartGrant`.
+        applyStartGrant();
         Analytics.event('session_start');
       });
     } else {
+      // Старый WebView не разобрал клиент — конфига не будет вовсе. Зовём всё
+      // равно: `tuned` отдаст значение сборки, поправка выйдет нулевой, и флаг
+      // проставится. Иначе сейв вечно ждал бы ответа, которого не будет.
+      applyStartGrant();
       Analytics.event('session_start');
     }
 
@@ -4277,8 +4332,17 @@ window.App = (() => {
     // Permission запрашиваем СРАЗУ при первом запуске приложения
     // (persisted.pushPermissionAsked === false). См. SKILL connect-local-notifications.
     if (!persisted.pushPermissionAsked && persisted.pushEnabled !== false) {
+      // Пишем СВЕЖИЙ сейв, а не снимок `persisted`: снимок снят в начале
+      // start(), а после него сейв успел измениться — `Persist.getUserId()`
+      // завёл идентификатор установки. Сохранение снимка затирало его обратно
+      // в null, и ровно на первом запуске userId терялся: со второго
+      // генерировался новый. То есть у каждой установки было ДВА user_id —
+      // разные группы A/B в первой сессии и во всех следующих, и лишний
+      // «игрок» в каждом отчёте, который считает по user_id.
+      const fresh = Persist.load();
+      fresh.pushPermissionAsked = true;
+      Persist.save(fresh);
       persisted.pushPermissionAsked = true;
-      Persist.save(persisted);
       setTimeout(function () {
         PushScheduler.requestPermission().then(function (result) {
           console.log('[push] permission result:', result);
@@ -4297,7 +4361,8 @@ window.App = (() => {
     // остаться interstitialPendingAt — иначе первый же запуск новой
     // версии встретил бы их именно той рекламой, которую мы убираем.
     const pendingAt = Persist.loadInterstitialPending();
-    if (pendingAt && Ads.interstitialsOn() && Date.now() - pendingAt < INTERSTITIAL_RECOVERY_MS) {
+    const recoveryMs = tuned('interstitial_recovery_min', INTERSTITIAL_RECOVERY_MS / 60000) * 60000;
+    if (pendingAt && Ads.interstitialsOn() && Date.now() - pendingAt < recoveryMs) {
       console.log('[Ads] recovery: показываем недосмотренный интерстишл');
       wireEvents();
       await presentInterstitialThenLoad(persisted.level || 1);
@@ -4665,6 +4730,10 @@ window.App = (() => {
   // Восстановление незаконченного уровня из сейва бесплатно — иначе каждый
   // перезапуск приложения списывал бы молнию за уже оплаченный уровень.
   // Пустой запас → попап «Недостаточно молний» с ролик-наградой на +5.
+  // Стартовый запас — десять молний, то есть десять уровней подряд без пауз.
+  // Потолок пассивного восстановления ниже намеренно (ENERGY_REGEN_CAP = 3):
+  // вход щедрый, дальше ритм.
+  const ENERGY_START     = 10;
   const ENERGY_PER_LEVEL = 1;
   const ENERGY_REWARD    = 5;
   // Пассивное восстановление: +1 молния в час, но только пока запас НИЖЕ
@@ -4705,6 +4774,41 @@ window.App = (() => {
     if (p.energy >= tuned('energy_regen_cap', ENERGY_REGEN_CAP)) p.energyRegenAt = Date.now();
     Persist.save(p);
     Render.renderEnergy({ pulse: true });
+  }
+
+  /**
+   * Довести стартовый запас до того, что сказал конфиг. Один раз за жизнь
+   * установки, сразу после ответа сети.
+   *
+   * ПОЧЕМУ НЕ ПРОСТО `energy = tuned(...)` ПРИ СОЗДАНИИ СЕЙВА. Сейв рождается
+   * раньше конфига и раньше первого экрана: его создаёт `Persist.getUserId()`,
+   * который нужен аналитике, а у загрузки конфига свой таймаут в 4 секунды.
+   * Ключ, прочитанный в тот момент, вернул бы значение сборки — у КАЖДОГО
+   * нового игрока, то есть ровно у тех, ради кого он и заведён.
+   *
+   * ПРИБАВЛЯЕМ РАЗНИЦУ, А НЕ ПРИСВАИВАЕМ. Уровень успевает начаться раньше
+   * ответа сети (`loadLevel` зовётся синхронно в конце `start`), и одна молния
+   * к этому времени уже списана. Присваивание вернуло бы её обратно, а при
+   * меньшем значении в бакете — отняло бы лишнюю. Разница же верна в любой
+   * момент: конфиг сказал не «столько у тебя сейчас», а «столько выдать на
+   * входе».
+   *
+   * Конфиг не доехал — `tuned` отдаёт значение сборки, разница равна нулю, и
+   * функция ничего не делает. Это и есть «недоступный бакет = игра как была».
+   */
+  function applyStartGrant() {
+    const p = Persist.load();
+    if (p.startAdjusted) return;
+    p.startAdjusted = true;
+    // Уровень уже пройден — стартовый запас своё отработал, и поправка
+    // означала бы правку кошелька играющего человека. Такое бывает, когда
+    // сети не было несколько дней и конфиг доехал только сейчас.
+    if ((p.totalCompleted | 0) === 0) {
+      const delta = tuned('energy_start', ENERGY_START) - ENERGY_START;
+      p.energy = Math.max(0, (p.energy | 0) + delta);
+    }
+    Persist.save(p);
+    Render.renderEnergy();
   }
 
   /**
@@ -5000,6 +5104,10 @@ window.App = (() => {
             level: p.level,
             totalCompleted: p.totalCompleted,
             energy: p.energy,
+            // Применена ли поправка стартового запаса из конфига. Без этого
+            // поля проверка `energy_start` читалась бы по одному числу
+            // молний, а оно совпадает и когда поправки не было вовсе.
+            startAdjusted: p.startAdjusted,
             adFreeStreak: p.adFreeStreak,
             rateUsCompleted: p.rateUsCompleted,
             sessionCount: p.sessionCount,
