@@ -2469,6 +2469,96 @@ window.RuStoreReviewClient = (() => {
 })();
 
 /* ============================================================
+   [RUSTORE_UPDATE] — обёртка над нативным RuStore In-App Updates SDK.
+   Контракт Java↔JS зашит в RuStoreUpdateBridge.java (генерируется html2apk
+   при флаге -RuStoreUpdateSdk): window.RuStoreUpdate.check/start/complete и
+   колбэки __rustoreUpdateInfo / __rustoreUpdateResult / __rustoreUpdateState.
+   Имена зафиксированы в Java — не переименовывать.
+
+   ЗАЧЕМ. Поставивший игру к карточке в магазине больше не возвращается: у него
+   на экране ярлык, а не витрина. Без этого SDK он остаётся на той версии,
+   которую скачал, — со всеми её ошибками, и починить их для него нельзя никак.
+
+   СЦЕНАРИЙ FLEXIBLE: РуСтор сам спрашивает согласие и качает в фоне, игра всё
+   это время работает. immediate забрал бы экран прямо на старте — это уместно
+   для банка, а не для головоломки, в которую зашли на пять минут.
+
+   СТАВИМ ТОЛЬКО МЕЖДУ УРОВНЯМИ. Установка перезапускает приложение, поэтому
+   скачанное ждёт (completeIfReady в onNext). Посреди уровня перезапуск отнял бы
+   разложенные ходы: позиция живёт в savedRun, а стек undo — нет.
+
+   «СКАЧАНО» ОПРЕДЕЛЯЕТСЯ ПО БАЙТАМ, а не только по коду статуса: числовые
+   константы InstallStatus живут в Java, и завязываться из JS на их значение
+   значит молча перестать ставить обновления в тот день, когда SDK их
+   перенумерует. Равенство скачанного и общего размера соврать не может.
+   ============================================================ */
+window.RuStoreUpdateClient = (() => {
+  const STATUS_DOWNLOADED = 11;   // тот же код, что в Java, но не единственная примета
+  const SCENARIO = 'flexible';
+
+  let callbacksRegistered = false;
+  let asked = false;
+  let readyToInstall = false;
+
+  const bridge = () => window.RuStoreUpdate;
+
+  function setupCallbacks() {
+    if (callbacksRegistered) return;
+    callbacksRegistered = true;
+
+    window.__rustoreUpdateInfo = (info, error) => {
+      // «Обновления нет» и «спросить не у кого» — для игрока одно и то же.
+      if (error || !info) {
+        console.log('[update] проверка без результата:', error || 'нет данных');
+        return;
+      }
+      if (!info.updateAvailable) return;
+      console.log('[update] есть версия', info.versionName, '— запускаю скачивание');
+      try {
+        const api = bridge();
+        if (api && api.start) api.start(SCENARIO);
+      } catch (e) { console.warn('[update] сценарий не запустился', e); }
+    };
+
+    window.__rustoreUpdateResult = (code, error) => {
+      if (error) console.warn('[update] сценарий завершился ошибкой:', error);
+      else console.log('[update] сценарий завершён, код', code);
+    };
+
+    window.__rustoreUpdateState = (status, downloaded, total) => {
+      if (status === STATUS_DOWNLOADED || (total > 0 && downloaded >= total)) readyToInstall = true;
+    };
+  }
+
+  /**
+   * Спросить магазин про новую версию. Один раз за запуск: повторная проверка
+   * в пределах сессии ничего нового не узнает и только жжёт сеть.
+   * Без моста (браузер, APK без флага) — тихо ничего не делает.
+   */
+  function check() {
+    const api = bridge();
+    if (!api || asked) return;
+    asked = true;
+    setupCallbacks();
+    try {
+      if (api.check) api.check();
+    } catch (e) { console.warn('[update] проверка не запустилась', e); }
+  }
+
+  /** Поставить скачанное, если оно есть. Зовётся на переходе между уровнями. */
+  function completeIfReady() {
+    if (!readyToInstall) return;
+    readyToInstall = false;
+    try {
+      const api = bridge();
+      if (api && api.complete) api.complete(SCENARIO);
+    } catch (e) { console.warn('[update] установка не запустилась', e); }
+  }
+
+  return { check, completeIfReady };
+})();
+
+/* ============================================================
    [PUSH_TEMPLATES] — шаблоны локальных push-уведомлений для Колбочек.
    Тон: спокойный, релакс, casual. Не агрессивно. ASMR-эффект цветов.
    ============================================================ */
@@ -4257,12 +4347,19 @@ window.App = (() => {
     // 1-2 сек на сетевой запрос; preload делает показ диалога мгновенным.
     RuStoreReviewClient.configure('com.terekh.glittersort');
 
+    // Обновление изнутри игры (RuStore In-App Updates). Спрашиваем магазин
+    // один раз за запуск; скачанное ставится не здесь, а на переходе между
+    // уровнями — см. блок [RUSTORE_UPDATE].
+    RuStoreUpdateClient.check();
+
     // AppMetrica analytics. configure ДО первого event(). SDK уже активирован
     // в MainActivity.onCreate (html2apk -YandexAppMetrica), здесь только цепляем
     // JS-обёртку и шлём session_start как маркер.
     Analytics.configure({
       appName: 'glittersort',
-      appVersion: '1.0.0',
+      // Версию инжектит html2apk рядом с __BUILD_RELEASE__. Константа здесь
+      // соврала бы в отчётах после первой же сборки.
+      appVersion: window.__APP_VERSION__ || '1.0.0',
       userId: Persist.getUserId()
     });
 
@@ -5044,6 +5141,10 @@ window.App = (() => {
       if (willShowInterstitial) {
         presentInterstitialThenLoad(nextLevel);
       } else {
+        // Тихий переход — единственное место, где перезапуск ради установки
+        // обновления ничего у игрока не отнимает: молния ещё не потрачена
+        // (её снимает loadLevel), а уровень уже засчитан в сейве.
+        RuStoreUpdateClient.completeIfReady();
         loadLevel(nextLevel);
       }
     };
