@@ -4710,13 +4710,33 @@ window.App = (() => {
     // приложения. Используем <a target="_blank">: Capacitor WebView
     // ловит навигацию по такой ссылке и через Intent.ACTION_VIEW
     // открывает её в системном браузере (а игра остаётся в WebView).
-    const PRIVACY_URL = 'https://cloud.mail.ru/public/gbq2/5oCQCPwCR';
+    //
+    // ОБЩИЙ САЙТ ПОЛИТИК, а не чьё-то личное облако. Прежний адрес на
+    // cloud.mail.ru требовал ручной перезаливки через личный кабинет: пока
+    // текст лежал там, действующая редакция зависела от того, вспомнил ли
+    // кто-то залить файл. Здесь источник — `Store_Info/PRIVACY_POLICY.md` в
+    // git, выкладка одной командой, а адрес строится из appId, который после
+    // первой публикации менять нельзя, — значит ссылка стабильна.
+    // Подробности и запрет на удаление старой ссылки — admin/docs/LEGAL.md.
+    const PRIVACY_URL = 'https://games-legal-b1g8r9eo.website.yandexcloud.net/glittersort/privacy.html';
+    // Запасная копия В САМОМ APK на случай, когда сети нет. Игру открывают в
+    // метро и в очереди, и отправлять игрока за юридическим текстом в
+    // интернет там значит показать пустой экран. Копию кладёт
+    // `node ../admin/tools/make-privacy.mjs` из того же .md.
+    const PRIVACY_URL_OFFLINE = './privacy.html';
     const $infoBtn   = document.getElementById('info-btn');
     const $infoModal = document.getElementById('info-modal');
     const $infoClose = document.getElementById('btn-info-close');
     const $infoLink  = document.getElementById('btn-privacy-link');
-    if ($infoLink) $infoLink.href = PRIVACY_URL;   // URL хранится в одном месте
-    const openInfo  = () => { if ($infoModal) $infoModal.classList.add('open'); };
+    // Адрес выбираем в МОМЕНТ ОТКРЫТИЯ модалки, а не один раз при запуске:
+    // сеть появляется и пропадает, а игра живёт сеансами по полчаса.
+    const privacyHref = () =>
+      (navigator.onLine === false ? PRIVACY_URL_OFFLINE : PRIVACY_URL);
+    if ($infoLink) $infoLink.href = privacyHref();
+    const openInfo  = () => {
+      if ($infoLink) $infoLink.href = privacyHref();
+      if ($infoModal) $infoModal.classList.add('open');
+    };
     const closeInfo = () => { if ($infoModal) $infoModal.classList.remove('open'); };
     if ($infoBtn)   $infoBtn.addEventListener('click', openInfo);
     if ($infoClose) $infoClose.addEventListener('click', closeInfo);
